@@ -1,0 +1,41 @@
+{
+  "items": [
+    {
+      "id": "event-1",
+      "status": "confirmed",
+      "htmlLink": "https://calendar.google.com/event?eid=1",
+      "summary": "Recurring Meet",
+      "description": "body",
+      "eventType": "default",
+      "iCalUID": "ical-1",
+      "recurringEventID": "series-1",
+      "start": {"dateTime": "2026-05-22T10:00:00Z", "timeZone": "UTC"},
+      "end": {"dateTime": "2026-05-22T10:30:00Z", "timeZone": "UTC"},
+      "originalStartTime": {"dateTime": "2026-05-22T10:00:00Z", "timeZone": "UTC"},
+      "organizer": {"email": "host@example.com"},
+      "attendees": [
+        {"email": "me@example.com", "responseStatus": "accepted", "self": true},
+        {"email": "ber-room@example.com", "displayName": "BER - R99 - Boardroom", "resource": true}
+      ],
+      "conferenceData": {"entryPoints": [{"entryPointType": "video", "uri": "https://meet.google.com/abc-defg-hij"}]},
+      "updated": "2026-05-21T09:00:00Z"
+    },
+    {
+      "id": "event-2",
+      "status": "confirmed",
+      "summary": "Focus",
+      "eventType": "focusTime",
+      "transparency": "transparent",
+      "start": {"date": "2026-05-23"},
+      "end": {"date": "2026-05-24"}
+    },
+    {
+      "id": "event-3",
+      "status": "cancelled",
+      "summary": "Cancelled",
+      "eventType": "default",
+      "start": {"dateTime": "2026-05-22T12:00:00Z"},
+      "end": {"dateTime": "2026-05-22T12:30:00Z"}
+    }
+  ]
+}
