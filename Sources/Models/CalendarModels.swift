@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 enum EventType: String, Codable, CaseIterable, Identifiable, Sendable {
@@ -169,10 +170,6 @@ struct CalendarEventOccurrence: Codable, Hashable, Identifiable, Sendable {
         status == .cancelled
     }
 
-    var isTimed: Bool {
-        !isAllDay && endDate > startDate
-    }
-
     func materialFingerprint(detectedLinks: [MeetingLink]) -> MaterialChangeFingerprint {
         let linkPart = detectedLinks.map(\.normalizedURLString).sorted().joined(separator: "|")
         let pieces = [
@@ -186,8 +183,11 @@ struct CalendarEventOccurrence: Codable, Hashable, Identifiable, Sendable {
             rsvpStatus.rawValue
         ]
         let joined = pieces.joined(separator: "\u{1f}")
-        let data = Data(joined.utf8)
-        return MaterialChangeFingerprint(value: data.base64EncodedString())
+        // SHA256 so the persisted fingerprint (reminder-state.json) cannot be
+        // reversed into titles/links. Base64 of the raw pieces leaked them.
+        let digest = SHA256.hash(data: Data(joined.utf8))
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        return MaterialChangeFingerprint(value: hex)
     }
 
     func privacyPreservingCacheCopy(detectedLinks: [MeetingLink]) -> CalendarEventOccurrence {
@@ -211,6 +211,25 @@ enum CalendarProviderAuthState: Equatable, Sendable {
 struct CalendarFetchWindow: Sendable {
     var start: Date
     var end: Date
+
+    /// Lookback so events that started recently still alert/join.
+    static let lookback: TimeInterval = 2 * 60 * 60
+    /// TECH.md guarantees a 24-hour offline-protection cache; the fetch window
+    /// must cover at least this horizon regardless of the menu visibility setting.
+    static let minimumProtectionHorizon: TimeInterval = 24 * 60 * 60
+
+    static func protective(
+        now: Date,
+        visibilityWindow: MenuVisibilityWindow,
+        calendar: Calendar = .current
+    ) -> CalendarFetchWindow {
+        let visibilityEnd = visibilityWindow.endDate(from: now, calendar: calendar)
+        let protectionEnd = now.addingTimeInterval(minimumProtectionHorizon)
+        return CalendarFetchWindow(
+            start: now.addingTimeInterval(-lookback),
+            end: max(visibilityEnd, protectionEnd)
+        )
+    }
 }
 
 extension ISO8601DateFormatter {

@@ -44,4 +44,21 @@ struct LogPrivacyTests {
         #expect(LogPrivacy.authState(.connected(accountEmail: "david.helmus@example.com")) == "connected")
         #expect(LogPrivacy.authState(.expired(reason: "token for david.helmus@example.com expired")) == "expired")
     }
+
+    @Test("Error class scrubbing drops embedded URLs and emails")
+    func errorClassDropsEmbeddedDetails() {
+        // Calendar API URLs contain calendar IDs, which are email addresses.
+        let url = URL(string: "https://www.googleapis.com/calendar/v3/calendars/alice@example.com/events")!
+        let error = URLError(.timedOut, userInfo: [
+            NSURLErrorFailingURLErrorKey: url,
+            NSLocalizedDescriptionKey: "The request to https://www.googleapis.com/calendar/v3/calendars/alice@example.com/events timed out."
+        ])
+
+        let scrubbed = LogPrivacy.errorClass(error)
+
+        #expect(!scrubbed.contains("alice@example.com"))
+        #expect(!scrubbed.contains("googleapis.com"))
+        // URLError with userInfo bridges to NSError; domain.code is the stable, content-free form.
+        #expect(scrubbed == "NSURLErrorDomain.-1001")
+    }
 }

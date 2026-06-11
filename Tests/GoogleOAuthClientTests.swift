@@ -178,6 +178,43 @@ struct GoogleOAuthClientTests {
         #expect(try makeClient().authorizationCode(from: receivedURL) == "loopback-code")
     }
 
+    @Test("Loopback listener survives speculative connections and favicon requests")
+    func loopbackListenerSurvivesNoise() async throws {
+        let server = try GoogleOAuthLoopbackServer(path: "/oauth2redirect-noise")
+        let waitTask = Task { try await server.waitForCallback(timeout: 5) }
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let baseURL = URL(string: server.redirectURI)!
+        let port = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!.port!
+
+        // Noise 1: Chrome-style speculative preconnect — opens TCP, sends nothing, closes.
+        let preconnect = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = in_port_t(UInt16(port)).bigEndian
+        address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+        _ = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
+                Darwin.connect(preconnect, socketAddress, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        Darwin.close(preconnect)
+
+        // Noise 2: favicon request on the wrong path.
+        let faviconURL = URL(string: "http://127.0.0.1:\(port)/favicon.ico")!
+        _ = try? await URLSession.shared.data(from: faviconURL)
+
+        // The real callback must still get through.
+        let callbackURL = URL(string: "\(server.redirectURI)?code=noise-resistant-code")!
+        let (_, response) = try await URLSession.shared.data(from: callbackURL)
+        let http = try #require(response as? HTTPURLResponse)
+        let receivedURL = try await waitTask.value
+
+        #expect(http.statusCode == 200)
+        #expect(try makeClient().authorizationCode(from: receivedURL) == "noise-resistant-code")
+    }
+
     private func makeClient(
         clientID: String = "desktop-client-id",
         clientSecret: String = "",
@@ -217,34 +254,5 @@ struct GoogleOAuthClientTests {
             let value = parts.count > 1 ? (parts[1].removingPercentEncoding ?? parts[1]) : ""
             return (key, value)
         })
-    }
-}
-
-private final class InMemoryKeychain: KeychainStoring, @unchecked Sendable {
-    private let lock = NSLock()
-    private var values: [String: String] = [:]
-
-    var valueCount: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return values.count
-    }
-
-    func save(_ value: String, forKey key: String) throws {
-        lock.lock()
-        defer { lock.unlock() }
-        values[key] = value
-    }
-
-    func retrieve(forKey key: String) -> String? {
-        lock.lock()
-        defer { lock.unlock() }
-        return values[key]
-    }
-
-    func delete(forKey key: String) throws {
-        lock.lock()
-        defer { lock.unlock() }
-        values.removeValue(forKey: key)
     }
 }

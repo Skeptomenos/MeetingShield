@@ -10,8 +10,9 @@ struct GoogleCalendarMappingTests {
         let url = try #require(Bundle.module.url(forResource: "google-events", withExtension: "json", subdirectory: "Fixtures"))
         let data = try Data(contentsOf: url)
 
-        let events = try GoogleCalendarMapper().mapEventList(data: data, calendar: calendar)
+        let (events, eventsPageToken) = try GoogleCalendarMapper().mapEventList(data: data, calendar: calendar)
 
+        #expect(eventsPageToken == nil)
         #expect(events.count == 3)
         #expect(events[0].eventType == .defaultEvent)
         #expect(events[0].rsvpStatus == .accepted)
@@ -33,6 +34,7 @@ struct GoogleCalendarMappingTests {
               "id": "first@example.com",
               "summary": "First Account",
               "primary": true,
+              "selected": true,
               "backgroundColor": "#0A84FF"
             },
             {
@@ -44,8 +46,9 @@ struct GoogleCalendarMappingTests {
         }
         """.utf8)
 
-        let calendars = try GoogleCalendarMapper().mapCalendarList(data: data)
+        let (calendars, listPageToken) = try GoogleCalendarMapper().mapCalendarList(data: data)
 
+        #expect(listPageToken == nil)
         #expect(calendars.map(\.id) == [
             "first@example.com::first@example.com",
             "first@example.com::team-calendar@example.com"
@@ -53,5 +56,48 @@ struct GoogleCalendarMappingTests {
         #expect(Set(calendars.map(\.accountID)) == ["first@example.com"])
         #expect(calendars[0].accountDisplayName == "First Account")
         #expect(calendars[1].sourceCalendarID == "team-calendar@example.com")
+    }
+
+    @Test("Calendar selection honors Google's selected flag, fails safe when absent")
+    func calendarSelectionHonorsSelectedFlag() throws {
+        let data = Data("""
+        {
+          "items": [
+            {
+              "id": "shown@example.com",
+              "summary": "Shown",
+              "primary": true,
+              "selected": true
+            },
+            {
+              "id": "unchecked@example.com",
+              "summary": "Unchecked in Google UI",
+              "selected": false
+            },
+            {
+              "id": "unspecified@example.com",
+              "summary": "No selected field"
+            },
+            {
+              "id": "hidden@example.com",
+              "summary": "Hidden",
+              "selected": true,
+              "hidden": true
+            }
+          ]
+        }
+        """.utf8)
+
+        let (calendars, _) = try GoogleCalendarMapper().mapCalendarList(data: data)
+        let selection = Dictionary(
+            calendars.compactMap { calendar in calendar.sourceCalendarID.map { ($0, calendar.isSelected) } },
+            uniquingKeysWith: { _, new in new }
+        )
+
+        #expect(selection["shown@example.com"] == true)
+        #expect(selection["unchecked@example.com"] == false)
+        // Absent flag fails safe toward protection (extra alerts beat missed meetings).
+        #expect(selection["unspecified@example.com"] == true)
+        #expect(selection["hidden@example.com"] == false)
     }
 }

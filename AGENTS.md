@@ -23,9 +23,9 @@ Native macOS menu bar app that prevents missed meetings with full-screen Google 
 
 ## Commands
 
-- Before app code exists: follow the implementation plan.
-- SwiftPM path: `swift test` and `swift build`.
-- Xcode path, once project exists: `xcodebuild -project MeetingShield.xcodeproj -scheme MeetingShield -configuration Debug build`.
+- Validation gate (required before claiming any work done): `script/validate.sh` — build, tests, smoke on the assembled .app, drift checks. Never substitute a subset.
+- Fast iteration: `swift build` and `swift test`.
+- Build, install, and run the dev app bundle: `script/build_and_run.sh` (assembly shared via `script/assemble_app.sh`).
 
 ## Product Constraints
 

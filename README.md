@@ -81,15 +81,26 @@ The connection flow follows [Google's installed desktop guidance](https://develo
 ## Build, Run, Test
 
 ```bash
-swift test
+./script/validate.sh          # full gate: build, tests, smoke, drift — the definition of done
+swift test                    # fast iteration
 swift build
-./script/build_and_run.sh
+./script/build_and_run.sh     # assemble dist/MeetingShield.app and launch it
 ./script/build_and_run.sh --verify
 ```
 
-`./script/build_and_run.sh` stages the SwiftPM executable into `dist/MeetingShield.app` and launches that bundle. The Codex Run action is wired to the same script through `.codex/environments/environment.toml`.
+`./script/build_and_run.sh` stages the SwiftPM executable into `dist/MeetingShield.app` (via `./script/assemble_app.sh`) and launches that bundle. The Codex Run action is wired to the same script through `.codex/environments/environment.toml`.
 
 There is no Xcode project in this MVP. Use SwiftPM commands unless an Xcode project is added later for signing, assets, notarization, or distribution packaging.
+
+## Code Signing
+
+Ad-hoc signatures change on every build, which resets Keychain ACLs (the stored OAuth tokens become unreadable) and notification permission on each reinstall. Create a stable self-signed identity once:
+
+1. Keychain Access > Certificate Assistant > Create a Certificate...
+2. Name: `MeetingShield Dev`, Identity Type: Self-Signed Root, Certificate Type: Code Signing.
+3. Rebuild. `script/assemble_app.sh` picks the certificate up automatically (or set `MEETING_SHIELD_CODESIGN_IDENTITY` to use a different identity).
+
+Without it, builds fall back to ad-hoc signing with a warning.
 
 ## Privacy Summary
 

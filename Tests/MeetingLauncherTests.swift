@@ -75,6 +75,61 @@ struct MeetingLauncherTests {
     }
 }
 
+@Suite("Browser launch commands")
+struct BrowserLaunchCommandTests {
+    private let url = URL(string: "https://meet.google.com/abc-defg-hij")!
+    private let fakeChromeBinary = URL(fileURLWithPath: "/Fake/Chrome.app/Contents/MacOS/Google Chrome")
+
+    private func launcher(executable: URL?) -> ProcessBrowserLauncher {
+        ProcessBrowserLauncher(appExecutableResolver: { _ in executable })
+    }
+
+    @Test("System default uses workspace open")
+    func systemDefaultUsesWorkspace() throws {
+        let command = try launcher(executable: nil).command(
+            for: url,
+            target: BrowserLaunchTarget(browser: .systemDefault, profileID: nil, bundleIdentifier: nil)
+        )
+
+        #expect(command == .workspaceOpen(url))
+    }
+
+    @Test("Profile launches exec the browser binary directly")
+    func profileLaunchExecsBinaryDirectly() throws {
+        // `open -b ... --args --profile-directory=X` silently ignores the
+        // profile when the browser is already running; direct exec does not.
+        let command = try launcher(executable: fakeChromeBinary).command(
+            for: url,
+            target: BrowserLaunchTarget(browser: .chrome, profileID: "Profile 1", bundleIdentifier: "com.google.Chrome")
+        )
+
+        #expect(command == .directExec(
+            executable: fakeChromeBinary,
+            arguments: ["--profile-directory=Profile 1", url.absoluteString]
+        ))
+    }
+
+    @Test("Profile launch with missing browser throws browserNotInstalled")
+    func missingBrowserThrows() {
+        #expect(throws: MeetingLauncherError.browserNotInstalled("Google Chrome")) {
+            _ = try launcher(executable: nil).command(
+                for: url,
+                target: BrowserLaunchTarget(browser: .chrome, profileID: "Profile 1", bundleIdentifier: "com.google.Chrome")
+            )
+        }
+    }
+
+    @Test("Non-profile branded launches use open -b with status checking")
+    func nonProfileUsesOpenTool() throws {
+        let command = try launcher(executable: nil).command(
+            for: url,
+            target: BrowserLaunchTarget(browser: .safari, profileID: nil, bundleIdentifier: "com.apple.Safari")
+        )
+
+        #expect(command == .openTool(arguments: ["-b", "com.apple.Safari", url.absoluteString]))
+    }
+}
+
 final class RecordingBrowserLauncher: BrowserLaunching, @unchecked Sendable {
     private let lock = NSLock()
     private var _lastTarget: BrowserLaunchTarget?

@@ -143,4 +143,22 @@ struct AppSettingsTests {
 
         #expect(protected.map(\.id) == [enabledPrimary.id])
     }
+
+    @Test("Settings payloads containing removed keys still decode")
+    func removedKeysStillDecode() throws {
+        // googleOAuthRedirectURI shipped in earlier builds and was removed
+        // (the loopback server generates its own redirect URI).
+        let legacyPayload = Data("""
+        {
+          "defaultLeadTime": 180,
+          "googleOAuthClientID": "legacy-client",
+          "googleOAuthRedirectURI": "http://127.0.0.1:9004/oauth2redirect"
+        }
+        """.utf8)
+
+        let decoded = try JSONDecoder().decode(AppSettingsSnapshot.self, from: legacyPayload)
+
+        #expect(decoded.defaultLeadTime == 180)
+        #expect(decoded.googleOAuthClientID == "legacy-client")
+    }
 }

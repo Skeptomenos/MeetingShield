@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 @preconcurrency import UserNotifications
 
@@ -6,6 +7,7 @@ struct MeetingNotification: Sendable {
     var title: String
     var body: String
     var date: Date?
+    var withSound: Bool = false
 }
 
 protocol MeetingNotifying: Sendable {
@@ -43,7 +45,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Mee
         let content = UNMutableNotificationContent()
         content.title = notification.title
         content.body = notification.body
-        content.sound = nil
+        content.sound = notification.withSound ? .default : nil
 
         let trigger: UNNotificationTrigger?
         if let date = notification.date, date > Date() {
@@ -62,5 +64,16 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Mee
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
         [.banner, .sound]
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        // Clicking a meeting notification brings Meeting Shield forward so the
+        // user can act on the reminder. Deep-link join is a tracked follow-up.
+        await MainActor.run {
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 }

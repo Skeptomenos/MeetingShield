@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MeetingAlertView: View {
     var reminders: [ScheduledReminder]
+    @ObservedObject var keyTarget: AlertKeyTarget
     var availableSnoozeChoices: (ScheduledReminder) -> [SnoozeChoice]
     var onJoin: (ScheduledReminder) -> Void
     var onSnooze: (ScheduledReminder, SnoozeChoice?) -> Void
@@ -9,10 +10,8 @@ struct MeetingAlertView: View {
     var onMute: (ScheduledReminder) -> Void
     var onSnoozeAll: () -> Void
 
-    @State private var selectedID: ScheduledReminder.ID?
-
     private var selectedReminder: ScheduledReminder {
-        reminders.first { $0.id == selectedID } ?? reminders[0]
+        keyTarget.selectedReminder ?? reminders[0]
     }
 
     var body: some View {
@@ -34,9 +33,6 @@ struct MeetingAlertView: View {
             }
             .padding(44)
         }
-        .onAppear {
-            selectedID = reminders.first?.id
-        }
         .onExitCommand {}
     }
 
@@ -45,10 +41,10 @@ struct MeetingAlertView: View {
             HStack(spacing: 6) {
                 ForEach(reminders) { reminder in
                     Button {
-                        selectedID = reminder.id
+                        keyTarget.selectedID = reminder.id
                     } label: {
                         HStack(spacing: 7) {
-                            Image(systemName: selectedID == reminder.id ? "circle.fill" : "circle")
+                            Image(systemName: keyTarget.selectedID == reminder.id ? "circle.fill" : "circle")
                                 .font(.system(size: 8, weight: .bold))
                             Text(reminder.event.title)
                                 .font(.system(size: 13, weight: .semibold))
@@ -57,10 +53,10 @@ struct MeetingAlertView: View {
                         .padding(.horizontal, 11)
                         .frame(height: 30)
                     }
-                    .buttonStyle(OverlapChipButtonStyle(isSelected: selectedID == reminder.id))
+                    .buttonStyle(OverlapChipButtonStyle(isSelected: keyTarget.selectedID == reminder.id))
                     .accessibilityLabel("Show alert for \(reminder.event.title)")
                     .accessibilityValue("Show alert for \(reminder.event.title)")
-                    .accessibilityHint(selectedID == reminder.id ? "Currently selected meeting" : "Switches the alert to this meeting")
+                    .accessibilityHint(keyTarget.selectedID == reminder.id ? "Currently selected meeting" : "Switches the alert to this meeting")
                 }
             }
             .padding(5)
@@ -250,18 +246,21 @@ struct MeetingAlertView: View {
         }
     }
 
-    private func timeLine(for reminder: ScheduledReminder) -> String {
+    private func timeLine(for reminder: ScheduledReminder, now: Date) -> String {
         let time = DateFormatter.shortTimeString(from: reminder.event.startDate)
-        let countdown = RelativeDateTimeFormatter.shortString(for: reminder.event.startDate, relativeTo: Date())
+        let countdown = RelativeDateTimeFormatter.shortString(for: reminder.event.startDate, relativeTo: now)
         return "\(time) · \(countdown)"
     }
 
     private func metadataRow(for reminder: ScheduledReminder) -> some View {
         VStack(spacing: 7) {
             HStack(spacing: 12) {
-                Label(timeLine(for: reminder), systemImage: "clock")
-                    .font(.system(size: 18, weight: .semibold, design: .rounded).monospacedDigit())
-                    .fixedSize(horizontal: true, vertical: false)
+                // Alerts stay on screen for minutes; the countdown must tick.
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Label(timeLine(for: reminder, now: context.date), systemImage: "clock")
+                        .font(.system(size: 18, weight: .semibold, design: .rounded).monospacedDigit())
+                        .fixedSize(horizontal: true, vertical: false)
+                }
                 if let meetingRoom = meetingRoomLabel(for: reminder) {
                     metadataDivider
                     Label(meetingRoom, systemImage: "mappin.and.ellipse")

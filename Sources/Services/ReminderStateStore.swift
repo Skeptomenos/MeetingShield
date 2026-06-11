@@ -18,7 +18,13 @@ final class ReminderStateStore: @unchecked Sendable {
         if let fileURL,
            let data = try? Data(contentsOf: fileURL),
            let decoded = try? JSONDecoder().decode([OccurrenceReminderState].self, from: data) {
-            states = Dictionary(uniqueKeysWithValues: decoded.map { ($0.occurrenceKey, $0) })
+            // Duplicate keys (corruption, older writers) must not trap; keep the newest entry.
+            states = Dictionary(
+                decoded.map { ($0.occurrenceKey, $0) },
+                uniquingKeysWith: { first, second in
+                    second.updatedAt >= first.updatedAt ? second : first
+                }
+            )
         } else {
             states = [:]
         }
@@ -109,7 +115,9 @@ final class ReminderStateStore: @unchecked Sendable {
             let data = try JSONEncoder().encode(Array(states.values))
             try data.write(to: fileURL, options: [.atomic])
         } catch {
-            // Reminder state loss should not crash the app; the next refresh will rebuild candidates.
+            // Reminder state loss must not crash the app, but it must be visible:
+            // lost dismissals mean repeat alerts after restart.
+            AppLog.lifecycle.error("reminderStatePersistFailed error=\(LogPrivacy.errorClass(error), privacy: .public)")
         }
     }
 }

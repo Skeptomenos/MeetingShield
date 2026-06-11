@@ -8,7 +8,7 @@
       "description": "body",
       "eventType": "default",
       "iCalUID": "ical-1",
-      "recurringEventID": "series-1",
+      "recurringEventId": "series-1",
       "start": {"dateTime": "2026-05-22T10:00:00Z", "timeZone": "UTC"},
       "end": {"dateTime": "2026-05-22T10:30:00Z", "timeZone": "UTC"},
       "originalStartTime": {"dateTime": "2026-05-22T10:00:00Z", "timeZone": "UTC"},

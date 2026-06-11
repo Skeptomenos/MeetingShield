@@ -56,7 +56,7 @@ struct BrowserProfileService: @unchecked Sendable {
             .map { name in
                 BrowserProfile(
                     id: name,
-                    displayName: profileDisplayName(for: name),
+                    displayName: profileDisplayName(for: name, root: root),
                     browser: browser,
                     localPath: root.appending(path: name, directoryHint: .isDirectory).path
                 )
@@ -67,8 +67,22 @@ struct BrowserProfileService: @unchecked Sendable {
         profiles(for: browser).contains { $0.id == profileID }
     }
 
-    private func profileDisplayName(for id: String) -> String {
-        if id == "Default" { return "Default" }
-        return id
+    /// Chromium-family profiles keep their human name in
+    /// `<profile>/Preferences` under `profile.name`; the directory name
+    /// ("Profile 2") is meaningless to users.
+    private func profileDisplayName(for id: String, root: URL) -> String {
+        let preferencesURL = root
+            .appending(path: id, directoryHint: .isDirectory)
+            .appending(path: "Preferences")
+        guard
+            let data = try? Data(contentsOf: preferencesURL),
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let profile = json["profile"] as? [String: Any],
+            let name = (profile["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !name.isEmpty
+        else {
+            return id
+        }
+        return name
     }
 }

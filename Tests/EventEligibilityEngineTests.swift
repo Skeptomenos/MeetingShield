@@ -22,7 +22,7 @@ struct EventEligibilityEngineTests {
             (.sample(eventID: "declined", title: "Declined", startDate: TestDates.start, rsvpStatus: .declined), .rsvpExcluded),
             (.sample(eventID: "free", title: "Free", startDate: TestDates.start, busyState: .free), .freeExcluded),
             (.sample(eventID: "focus", title: "Focus", startDate: TestDates.start, eventType: .focusTime), .eventTypeExcluded),
-            (.sample(eventID: "all-day", title: "All day", startDate: TestDates.start, isAllDay: true), .invalidTime)
+            (.sample(eventID: "all-day", title: "All day", startDate: TestDates.start, isAllDay: true), .allDay)
         ]
 
         for (event, reason) in samples {
@@ -30,6 +30,40 @@ struct EventEligibilityEngineTests {
             #expect(result.isEligible == false)
             #expect(result.reason == reason)
         }
+    }
+
+    @Test("All-day events become eligible when the calendar opts in")
+    func allDayOptInMakesAllDayEligible() {
+        let event = CalendarEventOccurrence.sample(
+            eventID: "all-day-opt-in",
+            title: "Company offsite",
+            startDate: TestDates.start,
+            endDate: TestDates.start.addingTimeInterval(24 * 60 * 60),
+            isAllDay: true
+        )
+        var settings = AppSettingsSnapshot.defaults
+        var calendarSettings = CalendarSettings.defaults(calendarID: "primary")
+        calendarSettings.includeAllDayEvents = true
+        settings.calendarSettings["primary"] = calendarSettings
+
+        let result = engine.evaluate(event: event, detectedLinks: [], settings: settings)
+
+        #expect(result.isEligible)
+    }
+
+    @Test("Zero-duration events are rejected as invalid time")
+    func zeroDurationRejected() {
+        let event = CalendarEventOccurrence.sample(
+            eventID: "zero",
+            title: "Zero",
+            startDate: TestDates.start,
+            endDate: TestDates.start
+        )
+
+        let result = engine.evaluate(event: event, detectedLinks: [], settings: .defaults)
+
+        #expect(result.isEligible == false)
+        #expect(result.reason == .invalidTime)
     }
 
     @Test("Calendar override can include free events")

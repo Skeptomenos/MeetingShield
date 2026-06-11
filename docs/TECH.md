@@ -12,6 +12,21 @@ Build Meeting Shield as a native macOS app with clear boundaries:
 
 Prefer small types with explicit responsibilities over central manager objects that own everything.
 
+### Module layout
+
+- `Sources/MeetingShieldApp.swift` — `@main` + `AppDelegate` only.
+- `Sources/Controllers/MeetingShieldController.swift` — published state + UI callback glue; delegates logic to services.
+- `Sources/Services/RefreshCoordinator.swift` — refresh state machine: auth gating, protective fetch window, cache fallback, failure counting, re-entrancy coalescing.
+- `Sources/Services/ReminderPipeline.swift` — pure events → due-reminders pipeline + `ReminderPresentationDecision`.
+- `Sources/Services/GoogleOAuth/` — OAuth models, PKCE, loopback server, token client, credentials resolver.
+- `Sources/Services/GoogleCalendar/` — provider actor, REST mapper, API DTOs.
+- `Sources/Services/` — remaining injectable services (eligibility, scheduler, launcher, profiles, cache, state store, notification health, sound policy, timers, system events).
+- `Sources/Views/` and `Sources/Views/Settings/` — SwiftUI surfaces and window controllers.
+
+### Validation gate
+
+`script/validate.sh` is the single definition of done: build → tests → smoke (assembled `dist/MeetingShield.app` runs `--smoke-test`) → drift checks. Run it before claiming any change complete; never substitute a subset.
+
 ## Swift And Concurrency
 
 - Treat Swift 6 concurrency warnings as correctness issues.

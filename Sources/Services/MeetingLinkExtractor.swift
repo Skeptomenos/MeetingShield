@@ -63,7 +63,8 @@ struct MeetingLinkExtractor: Sendable {
     }
 
     private static func urlCandidates(in text: String) -> [String] {
-        let pattern = #"(?i)\b((?:https?://)?(?:[\w-]+\.)+(?:com|us|net|org|io|co|app|dev|ai)(?:/[^\s<>"']*)?)"#
+        // Broad TLD match; the classifier decides what counts as a meeting link.
+        let pattern = #"(?i)\b((?:https?://)?(?:[\w-]+\.)+[a-z]{2,24}(?:/[^\s<>"']*)?)"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
         let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
         return regex.matches(in: text, range: nsRange).compactMap { match in
@@ -87,18 +88,44 @@ struct MeetingLinkExtractor: Sendable {
         return components.url
     }
 
+    /// Host labels that mark a domain as conferencing infrastructure
+    /// (e.g. meet.company.de, video.example.org).
+    private static let conferenceHostLabels: Set<String> = [
+        "meet", "meeting", "meetings", "video", "vc", "conference", "webinar"
+    ]
+
+    /// Exact path segments that mark a link as joinable on unknown hosts.
+    private static let conferencePathSegments: Set<String> = ["join", "meet", "meeting", "meetings"]
+
     private static func classify(url: URL) -> MeetingLinkKind? {
         guard let host = url.host?.lowercased() else { return nil }
         if host == "meet.google.com" { return .googleMeet }
-        if host == "zoom.us" || host.hasSuffix(".zoom.us") { return .zoom }
-        if host == "teams.microsoft.com" { return .teams }
+        if hostMatches(host, domain: "zoom.us") || hostMatches(host, domain: "zoom.com") || hostMatches(host, domain: "zoomgov.com") {
+            return .zoom
+        }
+        if host == "teams.microsoft.com" || host == "teams.live.com" { return .teams }
         if host.contains("webex.com") { return .webex }
-        if genericConferenceHosts.contains(where: { host == $0 || host.hasSuffix(".\($0)") }) {
+        if genericConferenceHosts.contains(where: { hostMatches(host, domain: $0) }) {
             return .generic
         }
-        if url.path.lowercased().contains("meeting") || url.path.lowercased().contains("join") {
+        // Self-hosted conferencing: meet.company.de, video.corp.example.
+        if let firstLabel = host.split(separator: ".").first,
+           conferenceHostLabels.contains(String(firstLabel)) {
+            return .generic
+        }
+        // Unknown host: only exact join/meeting path segments count, and the
+        // segment must start with the marker word to avoid editorial URLs
+        // ("/posts/why-meetings-suck", "/join-our-newsletter").
+        let segments = url.path.lowercased().split(separator: "/").map(String.init)
+        if segments.contains(where: { segment in
+            conferencePathSegments.contains(segment) || segment.hasPrefix("meeting-")
+        }) {
             return .generic
         }
         return nil
+    }
+
+    private static func hostMatches(_ host: String, domain: String) -> Bool {
+        host == domain || host.hasSuffix(".\(domain)")
     }
 }

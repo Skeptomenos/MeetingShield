@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class SettingsWindowController: NSWindowController {
+final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     static let shared = SettingsWindowController()
 
     private init() {
@@ -23,6 +23,7 @@ final class SettingsWindowController: NSWindowController {
         window.isMovableByWindowBackground = true
         window.isReleasedWhenClosed = false
         super.init(window: window)
+        window.delegate = self
         window.contentView = NSHostingView(rootView: SettingsView())
     }
 
@@ -39,6 +40,15 @@ final class SettingsWindowController: NSWindowController {
         positionOnMainScreen()
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        // Menu bar app: drop the Dock icon again unless a full-screen alert
+        // still needs the regular activation policy for key focus.
+        if !FullScreenAlertWindowController.shared.isShowing {
+            NSApp.setActivationPolicy(.accessory)
+            AppLog.lifecycle.debug("settingsWindowClosed activationPolicy=accessory")
+        }
     }
 
     private func positionOnMainScreen() {

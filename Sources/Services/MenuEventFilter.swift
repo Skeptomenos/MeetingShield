@@ -8,7 +8,8 @@ struct MenuEventFilter: Sendable {
     ) -> [CalendarEventOccurrence] {
         events
             .filter { event in
-                event.startDate >= now
+                // Keep in-progress meetings visible for rejoining.
+                event.endDate > now
                     && settings.isAccountEnabled(event.accountID)
                     && settings.isCalendarSelected(event.calendarID)
             }

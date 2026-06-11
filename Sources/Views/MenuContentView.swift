@@ -50,7 +50,13 @@ struct MenuContentView: View {
 
     @ViewBuilder
     private var statusSection: some View {
-        if let status = controller.statusMessage {
+        if let warning = controller.notificationWarning {
+            Label(warning, systemImage: "bell.slash.circle")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(LiquidGlassTheme.warning)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if let status = controller.statusMessage {
             Label(status, systemImage: "exclamationmark.triangle")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(LiquidGlassTheme.warning)

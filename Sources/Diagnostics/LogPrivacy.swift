@@ -16,7 +16,14 @@ enum LogPrivacy {
     }
 
     static func errorClass(_ error: Error) -> String {
-        String(reflecting: type(of: error))
+        let typeName = String(reflecting: type(of: error))
+        // NSError-bridged errors reflect as bare "NSError"; domain + code are
+        // constant identifiers (no userInfo content) and far more debuggable.
+        if typeName == "NSError" || typeName.hasSuffix(".NSError") {
+            let nsError = error as NSError
+            return "\(nsError.domain).\(nsError.code)"
+        }
+        return typeName
     }
 
     static func authState(_ state: CalendarProviderAuthState) -> String {

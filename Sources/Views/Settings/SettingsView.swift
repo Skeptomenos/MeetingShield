@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-private enum SettingsPane: String, CaseIterable, Identifiable {
+enum SettingsPane: String, CaseIterable, Identifiable {
     case general
     case accounts
     case calendars
@@ -31,7 +31,7 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
     }
 }
 
-private enum SettingsTheme {
+enum SettingsTheme {
     static let window = LiquidGlassTheme.window
     static let sidebar = LiquidGlassTheme.sidebar
     static let card = LiquidGlassTheme.glassFill
@@ -40,13 +40,12 @@ private enum SettingsTheme {
     static let selected = LiquidGlassTheme.accent.opacity(0.22)
 }
 
-private enum SettingsLayout {
+enum SettingsLayout {
     static let titlebarSafeTopPadding: CGFloat = 50
 }
-
 struct SettingsView: View {
-    @ObservedObject private var store = AppSettingsStore.shared
-    @ObservedObject private var controller = MeetingShieldController.shared
+    @ObservedObject var store = AppSettingsStore.shared
+    @ObservedObject var controller = MeetingShieldController.shared
     @State private var selectedPane: SettingsPane = .calendars
     @State private var showDeveloperSetup = false
 
@@ -211,168 +210,39 @@ struct SettingsView: View {
                     .controlSize(.small)
                     .frame(width: 112)
                 }
-            }
-        }
-    }
-
-    private var calendarsSection: some View {
-        SettingsSection(title: "Calendars") {
-            if controller.calendars.isEmpty {
-                SettingsCard {
-                    SettingsRow(title: "No calendars")
-                }
-            } else {
-                VStack(alignment: .leading, spacing: 12) {
-                    ForEach(calendarsGroupedByAccount, id: \.account.id) { group in
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(store.snapshot.displayName(for: group.account))
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(LiquidGlassTheme.secondaryText)
-                                .padding(.leading, 2)
-                            SettingsCard {
-                                ForEach(Array(group.calendars.enumerated()), id: \.element.id) { index, calendar in
-                                    calendarRow(calendar)
-                                    if index < group.calendars.count - 1 {
-                                        SettingsDivider()
-                                    }
-                                }
-                            }
-                        }
+                if store.snapshot.defaultBrowserSelection.browser.supportsProfileSelection {
+                    SettingsDivider()
+                    SettingsRow(title: "Profile") {
+                        profilePicker(
+                            browser: store.snapshot.defaultBrowserSelection.browser,
+                            selection: globalProfileBinding
+                        )
                     }
                 }
             }
         }
     }
 
-    private var accountsSection: some View {
-        SettingsSection(title: "Accounts") {
-            SettingsCard {
-                if connectedAccounts.isEmpty {
-                    SettingsRow(title: "No connected accounts")
-                } else {
-                    ForEach(Array(connectedAccounts.enumerated()), id: \.element.id) { index, account in
-                        accountRow(account)
-                        if index < connectedAccounts.count - 1 {
-                            SettingsDivider()
-                        }
-                    }
+    @ViewBuilder
+    func profilePicker(browser: BrowserKind, selection: Binding<String?>) -> some View {
+        let profiles = BrowserProfileService().profiles(for: browser)
+        if profiles.isEmpty {
+            Text("No profiles found")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(LiquidGlassTheme.tertiaryText)
+        } else {
+            Picker("Profile", selection: selection) {
+                Text("Browser default").tag(String?.none)
+                ForEach(profiles) { profile in
+                    Text(profile.displayName).tag(String?.some(profile.id))
                 }
             }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .controlSize(.small)
+            .frame(width: 150)
         }
     }
-
-    private func accountRow(_ account: ConnectedCalendarAccount) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center, spacing: 16) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(store.snapshot.displayName(for: account))
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(LiquidGlassTheme.primaryText)
-                        .lineLimit(1)
-                    if store.snapshot.displayName(for: account) != account.displayName {
-                        Text(account.displayName)
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(LiquidGlassTheme.tertiaryText)
-                            .lineLimit(1)
-                    }
-                    Text(store.snapshot.isAccountEnabled(account.id) ? "Active" : "Deactivated")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(LiquidGlassTheme.secondaryText)
-                }
-                Spacer(minLength: 12)
-                CompactSwitch(isOn: accountEnabledBinding(account.id), accessibilityLabel: "Account active")
-                Button("Remove", role: .destructive) {
-                    controller.removeConnectedAccount(account.id)
-                }
-                .buttonStyle(SmallGlassButtonStyle(role: .destructive, minWidth: 64))
-            }
-            TextField("Nickname for primary calendar", text: accountNicknameBinding(account.id))
-                .glassTextField()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-    }
-
-    private var connectedAccounts: [ConnectedCalendarAccount] {
-        var byID = Dictionary(uniqueKeysWithValues: controller.accounts.map { ($0.id, $0) })
-        for calendar in controller.calendars {
-            byID[calendar.accountID] = ConnectedCalendarAccount(
-                id: calendar.accountID,
-                displayName: calendar.accountDisplayName ?? calendar.accountID
-            )
-        }
-        return byID.values.sorted { first, second in
-            store.snapshot.displayName(for: first).localizedCaseInsensitiveCompare(store.snapshot.displayName(for: second)) == .orderedAscending
-        }
-    }
-
-    private var calendarsGroupedByAccount: [(account: ConnectedCalendarAccount, calendars: [UserCalendar])] {
-        let accounts = connectedAccounts
-        return accounts.compactMap { account in
-            let calendars = controller.calendars
-                .filter { $0.accountID == account.id }
-                .sorted { first, second in
-                    if first.isPrimary != second.isPrimary {
-                        return first.isPrimary
-                    }
-                    return first.displayName.localizedCaseInsensitiveCompare(second.displayName) == .orderedAscending
-                }
-            guard !calendars.isEmpty else { return nil }
-            return (account, calendars)
-        }
-    }
-
-    private func calendarRow(_ calendar: UserCalendar) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center, spacing: 16) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(calendar.displayName)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(LiquidGlassTheme.primaryText)
-                        .lineLimit(1)
-                    HStack(spacing: 6) {
-                        if calendar.isPrimary {
-                            Text("Primary")
-                        }
-                        Text("Alerts enabled")
-                    }
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(LiquidGlassTheme.secondaryText)
-                    let menuLabel = store.snapshot.displayName(for: calendar)
-                    if menuLabel != calendar.displayName {
-                        Text("Menu label: \(menuLabel)")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(LiquidGlassTheme.tertiaryText)
-                            .lineLimit(1)
-                    }
-                }
-                Spacer(minLength: 12)
-                VStack(alignment: .trailing, spacing: 7) {
-                    HStack(spacing: 7) {
-                        Text("On")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(LiquidGlassTheme.tertiaryText)
-                        CompactSwitch(isOn: calendarSelectedBinding(calendar.id), accessibilityLabel: "Calendar enabled")
-                            .disabled(!store.snapshot.isAccountEnabled(calendar.accountID))
-                    }
-                    HStack(spacing: 7) {
-                        Text("Alerts")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(LiquidGlassTheme.tertiaryText)
-                        CompactSwitch(isOn: calendarAlertsBinding(calendar.id), accessibilityLabel: "Calendar alerts")
-                            .disabled(!store.snapshot.isAccountEnabled(calendar.accountID))
-                    }
-                }
-            }
-            TextField(calendar.isPrimary ? "Calendar alias or account nickname" : "Calendar alias", text: calendarAliasBinding(calendar.id))
-                .glassTextField()
-                .disabled(!store.snapshot.isAccountEnabled(calendar.accountID))
-        }
-        .opacity(store.snapshot.isAccountEnabled(calendar.accountID) ? 1 : 0.55)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-    }
-
     private var menuBarSection: some View {
         SettingsSection(title: "Menu Bar") {
             SettingsCard {
@@ -408,6 +278,18 @@ struct SettingsView: View {
     private var recoverySection: some View {
         SettingsSection(title: "Recovery") {
             SettingsCard {
+                if controller.notificationHealth.authorizationDenied {
+                    SettingsRow {
+                        Label(
+                            "Notifications are disabled in System Settings. Presentation mode and wake grace alerts cannot appear.",
+                            systemImage: "bell.slash.circle.fill"
+                        )
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(LiquidGlassTheme.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
+                    SettingsDivider()
+                }
                 SettingsRow(title: "Presentation mode by default") {
                     CompactSwitch(isOn: boolBinding(\.presentationModeDefault), accessibilityLabel: "Presentation mode by default")
                 }
@@ -480,72 +362,18 @@ struct SettingsView: View {
 
     private var launchAtLoginBinding: Binding<Bool> {
         Binding {
-            store.snapshot.launchAtLoginEnabled
+            // The registration is the source of truth when running as a bundle;
+            // the stored flag alone can drift from reality.
+            if Bundle.main.bundleURL.pathExtension == "app" {
+                return LaunchAtLoginService.shared.isEnabled
+            }
+            return store.snapshot.launchAtLoginEnabled
         } set: { value in
             updateSettings { $0.launchAtLoginEnabled = value }
-            try? LaunchAtLoginService.shared.setEnabled(value)
-        }
-    }
-
-    private func accountEnabledBinding(_ accountID: String) -> Binding<Bool> {
-        Binding {
-            store.snapshot.isAccountEnabled(accountID)
-        } set: { isEnabled in
-            updateSettings { settings in
-                if isEnabled {
-                    settings.disabledGoogleAccountIDs.remove(accountID)
-                } else {
-                    settings.disabledGoogleAccountIDs.insert(accountID)
-                }
-            }
-        }
-    }
-
-    private func calendarSelectedBinding(_ calendarID: String) -> Binding<Bool> {
-        Binding {
-            store.snapshot.isCalendarSelected(calendarID)
-        } set: { isSelected in
-            updateSettings { settings in
-                if settings.selectedCalendarIDs.isEmpty {
-                    settings.selectedCalendarIDs = Set(controller.calendars.map(\.id))
-                }
-                if isSelected {
-                    settings.selectedCalendarIDs.insert(calendarID)
-                } else {
-                    settings.selectedCalendarIDs.remove(calendarID)
-                }
-            }
-        }
-    }
-
-    private func calendarAlertsBinding(_ calendarID: String) -> Binding<Bool> {
-        Binding {
-            store.snapshot.calendarSettings(for: calendarID).isAlertEnabled
-        } set: { isEnabled in
-            updateSettings { settings in
-                var calendarSettings = settings.calendarSettings(for: calendarID)
-                calendarSettings.isAlertEnabled = isEnabled
-                settings.calendarSettings[calendarID] = calendarSettings
-            }
-        }
-    }
-
-    private func accountNicknameBinding(_ accountID: String) -> Binding<String> {
-        Binding {
-            store.snapshot.accountNicknames[accountID] ?? ""
-        } set: { nickname in
-            updateSettings { settings in
-                settings.accountNicknames[accountID] = nickname
-            }
-        }
-    }
-
-    private func calendarAliasBinding(_ calendarID: String) -> Binding<String> {
-        Binding {
-            store.snapshot.calendarAliases[calendarID] ?? ""
-        } set: { alias in
-            updateSettings { settings in
-                settings.calendarAliases[calendarID] = alias
+            do {
+                try LaunchAtLoginService.shared.setEnabled(value)
+            } catch {
+                AppLog.lifecycle.error("launchAtLoginUpdateFailed error=\(LogPrivacy.errorClass(error), privacy: .public)")
             }
         }
     }
@@ -582,88 +410,9 @@ struct SettingsView: View {
         }
     }
 
-    private func updateSettings(_ change: (inout AppSettingsSnapshot) -> Void) {
+    func updateSettings(_ change: (inout AppSettingsSnapshot) -> Void) {
         store.update(change)
         controller.handleSettingsChanged()
     }
 }
 
-private struct SettingsSection<Content: View>: View {
-    var title: String
-    @ViewBuilder var content: () -> Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title.uppercased())
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(LiquidGlassTheme.secondaryText)
-                .tracking(0.6)
-                .padding(.leading, 2)
-            content()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private struct SettingsCard<Content: View>: View {
-    @ViewBuilder var content: () -> Content
-
-    var body: some View {
-        VStack(spacing: 0) {
-            content()
-        }
-        .glassPanel(cornerRadius: 10)
-        .frame(maxWidth: .infinity)
-    }
-}
-
-private struct SettingsRow<Control: View>: View {
-    var title: String?
-    var value: String?
-    @ViewBuilder var control: () -> Control
-
-    init(title: String? = nil, value: String? = nil, @ViewBuilder control: @escaping () -> Control = { EmptyView() }) {
-        self.title = title
-        self.value = value
-        self.control = control
-    }
-
-    var body: some View {
-        HStack(spacing: 16) {
-            if let title {
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(LiquidGlassTheme.primaryText)
-                    .lineLimit(1)
-                Spacer(minLength: 12)
-                if let value {
-                    Text(value)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(LiquidGlassTheme.secondaryText)
-                        .lineLimit(1)
-                }
-                control()
-            } else {
-                control()
-                Spacer(minLength: 12)
-                if let value {
-                    Text(value)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(LiquidGlassTheme.secondaryText)
-                        .lineLimit(1)
-                }
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private struct SettingsDivider: View {
-    var body: some View {
-        Rectangle()
-            .fill(SettingsTheme.separator)
-            .frame(height: 1)
-    }
-}

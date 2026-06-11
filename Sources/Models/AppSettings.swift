@@ -140,7 +140,6 @@ struct AppSettingsSnapshot: Codable, Equatable, Sendable {
     var calendarSettings: [String: CalendarSettings]
     var rules: [ReminderRule]
     var googleOAuthClientID: String
-    var googleOAuthRedirectURI: String
 
     enum CodingKeys: String, CodingKey {
         case defaultBrowserSelection
@@ -161,7 +160,6 @@ struct AppSettingsSnapshot: Codable, Equatable, Sendable {
         case calendarSettings
         case rules
         case googleOAuthClientID
-        case googleOAuthRedirectURI
     }
 
     static let defaultLeadTimeRange: ClosedRange<TimeInterval> = 30...900
@@ -185,8 +183,7 @@ struct AppSettingsSnapshot: Codable, Equatable, Sendable {
         calendarAliases: [:],
         calendarSettings: [:],
         rules: [],
-        googleOAuthClientID: "",
-        googleOAuthRedirectURI: ""
+        googleOAuthClientID: ""
     )
 
     init(
@@ -207,8 +204,7 @@ struct AppSettingsSnapshot: Codable, Equatable, Sendable {
         calendarAliases: [String: String],
         calendarSettings: [String: CalendarSettings],
         rules: [ReminderRule],
-        googleOAuthClientID: String,
-        googleOAuthRedirectURI: String
+        googleOAuthClientID: String
     ) {
         self.defaultBrowserSelection = defaultBrowserSelection
         self.defaultLeadTime = defaultLeadTime
@@ -228,7 +224,6 @@ struct AppSettingsSnapshot: Codable, Equatable, Sendable {
         self.calendarSettings = calendarSettings
         self.rules = rules
         self.googleOAuthClientID = googleOAuthClientID
-        self.googleOAuthRedirectURI = googleOAuthRedirectURI
     }
 
     init(from decoder: Decoder) throws {
@@ -252,7 +247,6 @@ struct AppSettingsSnapshot: Codable, Equatable, Sendable {
         calendarSettings = try container.decodeIfPresent([String: CalendarSettings].self, forKey: .calendarSettings) ?? defaults.calendarSettings
         rules = try container.decodeIfPresent([ReminderRule].self, forKey: .rules) ?? defaults.rules
         googleOAuthClientID = try container.decodeIfPresent(String.self, forKey: .googleOAuthClientID) ?? defaults.googleOAuthClientID
-        googleOAuthRedirectURI = try container.decodeIfPresent(String.self, forKey: .googleOAuthRedirectURI) ?? defaults.googleOAuthRedirectURI
     }
 
     func normalized() -> AppSettingsSnapshot {
@@ -372,7 +366,11 @@ final class AppSettingsStore: ObservableObject {
     }
 
     private func persist() {
-        guard let data = try? JSONEncoder().encode(snapshot) else { return }
-        userDefaults.set(data, forKey: key)
+        do {
+            let data = try JSONEncoder().encode(snapshot)
+            userDefaults.set(data, forKey: key)
+        } catch {
+            AppLog.lifecycle.error("settingsPersistFailed error=\(LogPrivacy.errorClass(error), privacy: .public)")
+        }
     }
 }

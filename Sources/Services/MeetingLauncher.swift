@@ -5,26 +5,71 @@ protocol BrowserLaunching: Sendable {
     func open(_ url: URL, target: BrowserLaunchTarget) throws
 }
 
+/// The resolved way to launch a URL. Split from execution so argv and
+/// executable selection are unit-testable.
+enum BrowserLaunchCommand: Equatable, Sendable {
+    case workspaceOpen(URL)
+    case openTool(arguments: [String])
+    case directExec(executable: URL, arguments: [String])
+}
+
 struct ProcessBrowserLauncher: BrowserLaunching {
-    func open(_ url: URL, target: BrowserLaunchTarget) throws {
-        if target.browser == .systemDefault {
-            NSWorkspace.shared.open(url)
-            return
-        }
+    /// Resolves a bundle identifier to the app's main executable.
+    var appExecutableResolver: @Sendable (String) -> URL?
 
-        var arguments: [String] = []
-        if let bundleIdentifier = target.bundleIdentifier {
-            arguments += ["-b", bundleIdentifier]
+    init(appExecutableResolver: (@Sendable (String) -> URL?)? = nil) {
+        self.appExecutableResolver = appExecutableResolver ?? { bundleIdentifier in
+            guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) else {
+                return nil
+            }
+            return Bundle(url: appURL)?.executableURL
         }
-        arguments.append(url.absoluteString)
+    }
+
+    func command(for url: URL, target: BrowserLaunchTarget) throws -> BrowserLaunchCommand {
+        guard target.browser != .systemDefault, let bundleIdentifier = target.bundleIdentifier else {
+            return .workspaceOpen(url)
+        }
         if let profileID = target.profileID, target.browser.supportsProfileSelection {
-            arguments += ["--args", "--profile-directory=\(profileID)"]
+            // `open -b <id> <url> --args --profile-directory=X` only applies the
+            // profile when the browser is NOT already running — otherwise the URL
+            // silently opens in the last-used profile (forbidden by TECH.md).
+            // Direct binary exec forwards the profile to a running instance too.
+            guard let executable = appExecutableResolver(bundleIdentifier) else {
+                throw MeetingLauncherError.browserNotInstalled(target.browser.displayName)
+            }
+            return .directExec(
+                executable: executable,
+                arguments: ["--profile-directory=\(profileID)", url.absoluteString]
+            )
         }
+        return .openTool(arguments: ["-b", bundleIdentifier, url.absoluteString])
+    }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        process.arguments = arguments
-        try process.run()
+    func open(_ url: URL, target: BrowserLaunchTarget) throws {
+        switch try command(for: url, target: target) {
+        case .workspaceOpen(let url):
+            guard NSWorkspace.shared.open(url) else {
+                throw MeetingLauncherError.launchFailed("System default browser refused the URL.")
+            }
+        case .openTool(let arguments):
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            process.arguments = arguments
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else {
+                AppLog.alert.error("browserOpenToolFailed status=\(process.terminationStatus, privacy: .public)")
+                throw MeetingLauncherError.launchFailed("\(target.browser.displayName) could not be opened (open exited \(process.terminationStatus)).")
+            }
+        case .directExec(let executable, let arguments):
+            let process = Process()
+            process.executableURL = executable
+            process.arguments = arguments
+            // Do not wait: a fresh browser process keeps running; an already-
+            // running browser makes this forwarder exit immediately.
+            try process.run()
+        }
     }
 }
 
@@ -69,18 +114,39 @@ struct MeetingLauncher: Sendable {
             }
         }
 
-        try browserLauncher.open(url, target: target)
+        do {
+            try browserLauncher.open(url, target: target)
+        } catch {
+            // Urgent joins must not dead-end on a broken branded-browser
+            // setup; fall back to the system default browser visibly.
+            guard urgent, target.browser != .systemDefault else { throw error }
+            AppLog.alert.error("brandedBrowserLaunchFailedFallingBack error=\(LogPrivacy.errorClass(error), privacy: .public)")
+            let fallbackTarget = BrowserLaunchTarget(browser: .systemDefault, profileID: nil, bundleIdentifier: nil)
+            try browserLauncher.open(url, target: fallbackTarget)
+            return MeetingLaunchResult(
+                openedURL: url,
+                target: fallbackTarget,
+                usedFallbackProfile: true,
+                warning: "Couldn't open \(target.browser.displayName); opened your default browser instead."
+            )
+        }
         return MeetingLaunchResult(openedURL: url, target: target, usedFallbackProfile: usedFallback, warning: warning)
     }
 }
 
 enum MeetingLauncherError: Error, LocalizedError, Equatable {
     case profileNotFound(String)
+    case browserNotInstalled(String)
+    case launchFailed(String)
 
     var errorDescription: String? {
         switch self {
         case .profileNotFound(let profile):
             "Browser profile not found: \(profile)"
+        case .browserNotInstalled(let browser):
+            "\(browser) is not installed."
+        case .launchFailed(let reason):
+            reason
         }
     }
 }
