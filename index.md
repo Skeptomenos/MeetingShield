@@ -1,15 +1,15 @@
 # Meeting Shield index
 
-Reconciled: 2026-09-12. GitHub PRs and Linear were checked for the workstreams below. Core reliability PR #242 merged into main at `77fcf7a3` on September 12. Native redesign PR #247 remains in review; its design is not yet on main. Code integration does not close broader installed-app acceptance or deferred work.
+Reconciled: 2026-09-12. GitHub PRs and Linear were checked for the workstreams below. Core reliability PR #242 merged at `77fcf7a3` and native redesign PR #247 merged at `e2ae2f1a` on September 12. Both are available on main. Code integration does not close broader installed-app acceptance or deferred work.
 
 ## Continue work
 
 | Workstream | Plan and checkout | Tracking |
 | --- | --- | --- |
 | Core reliability | [Core plan](_planning/plans/2026-08-31-close-capability-and-reliability-gaps.md), available on main | DEV-151; [merged PR #242](https://github.com/Skeptomenos/ai-dev/pull/242) |
-| Native redesign | `_planning/plans/2026-09-07-native-redesign.md` on `apps/meeting-shield/DEV-172-native-redesign` | DEV-172; [PR #247](https://github.com/Skeptomenos/ai-dev/pull/247), includes merged #242; coordinator will retarget to main |
+| Native redesign | [Redesign plan](_planning/plans/2026-09-07-native-redesign.md), available on main | DEV-172; [merged PR #247](https://github.com/Skeptomenos/ai-dev/pull/247), includes merged #242 |
 
-The core plan is on main. Locate the current redesign checkout with `git worktree list`; its plan remains branch-only until #247 is integrated. For work on either stream, read its plan in that checkout and follow its evidence links. Keep scope, decisions, open acceptance and next actions in that plan; findings and run records belong in its linked dated `_planning/` evidence files. Confirm current branch and tracker state before continuing. For a distinct workstream that needs a durable plan, use `_planning/plans/` and add its pointer here.
+Both plans are on main. Original worktrees remain available through `git worktree list`; verify their heads before reuse. For work on either stream, read its current plan and follow its evidence links. Keep scope, decisions, open acceptance and next actions in that plan; findings and run records belong in its linked dated `_planning/` evidence files. Confirm current branch and tracker state before continuing. For a distinct workstream that needs a durable plan, use `_planning/plans/` and add its pointer here.
 
 Private `_planning/` content is stripped from public splits. Obtain the applicable private plan before continuing its acceptance work; older plans do not substitute for it.
 
