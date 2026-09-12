@@ -132,8 +132,11 @@ struct AppSettingsSnapshot: Codable, Equatable, Sendable {
     var presentationModeDefault: Bool
     var launchAtLoginEnabled: Bool
     var wakeGraceEnabled: Bool
-    var visibleWindowDays: Int
-    var selectedCalendarIDs: Set<String>
+    var selectedCalendarIDs: Set<String> {
+        didSet { hasExplicitCalendarSelection = true }
+    }
+    private(set) var hasExplicitCalendarSelection: Bool
+    private(set) var providerDefaultCalendarIDs: Set<String>?
     var disabledGoogleAccountIDs: Set<String>
     var accountNicknames: [String: String]
     var calendarAliases: [String: String]
@@ -152,14 +155,19 @@ struct AppSettingsSnapshot: Codable, Equatable, Sendable {
         case presentationModeDefault
         case launchAtLoginEnabled
         case wakeGraceEnabled
-        case visibleWindowDays
         case selectedCalendarIDs
+        case hasExplicitCalendarSelection
+        case providerDefaultCalendarIDs
         case disabledGoogleAccountIDs
         case accountNicknames
         case calendarAliases
         case calendarSettings
         case rules
         case googleOAuthClientID
+    }
+
+    private enum LegacyCodingKeys: String, CodingKey {
+        case visibleWindowDays
     }
 
     static let defaultLeadTimeRange: ClosedRange<TimeInterval> = 30...900
@@ -176,7 +184,6 @@ struct AppSettingsSnapshot: Codable, Equatable, Sendable {
         presentationModeDefault: false,
         launchAtLoginEnabled: false,
         wakeGraceEnabled: true,
-        visibleWindowDays: 1,
         selectedCalendarIDs: [],
         disabledGoogleAccountIDs: [],
         accountNicknames: [:],
@@ -197,14 +204,15 @@ struct AppSettingsSnapshot: Codable, Equatable, Sendable {
         presentationModeDefault: Bool,
         launchAtLoginEnabled: Bool,
         wakeGraceEnabled: Bool,
-        visibleWindowDays: Int,
         selectedCalendarIDs: Set<String>,
         disabledGoogleAccountIDs: Set<String>,
         accountNicknames: [String: String],
         calendarAliases: [String: String],
         calendarSettings: [String: CalendarSettings],
         rules: [ReminderRule],
-        googleOAuthClientID: String
+        googleOAuthClientID: String,
+        hasExplicitCalendarSelection: Bool? = nil,
+        providerDefaultCalendarIDs: Set<String>? = nil
     ) {
         self.defaultBrowserSelection = defaultBrowserSelection
         self.defaultLeadTime = defaultLeadTime
@@ -216,8 +224,9 @@ struct AppSettingsSnapshot: Codable, Equatable, Sendable {
         self.presentationModeDefault = presentationModeDefault
         self.launchAtLoginEnabled = launchAtLoginEnabled
         self.wakeGraceEnabled = wakeGraceEnabled
-        self.visibleWindowDays = visibleWindowDays
         self.selectedCalendarIDs = selectedCalendarIDs
+        self.hasExplicitCalendarSelection = hasExplicitCalendarSelection ?? !selectedCalendarIDs.isEmpty
+        self.providerDefaultCalendarIDs = providerDefaultCalendarIDs
         self.disabledGoogleAccountIDs = disabledGoogleAccountIDs
         self.accountNicknames = accountNicknames
         self.calendarAliases = calendarAliases
@@ -232,15 +241,24 @@ struct AppSettingsSnapshot: Codable, Equatable, Sendable {
         defaultBrowserSelection = try container.decodeIfPresent(BrowserSelection.self, forKey: .defaultBrowserSelection) ?? defaults.defaultBrowserSelection
         defaultLeadTime = try container.decodeIfPresent(TimeInterval.self, forKey: .defaultLeadTime) ?? defaults.defaultLeadTime
         globalSnoozeDuration = try container.decodeIfPresent(TimeInterval.self, forKey: .globalSnoozeDuration) ?? defaults.globalSnoozeDuration
-        visibilityWindow = try container.decodeIfPresent(MenuVisibilityWindow.self, forKey: .visibilityWindow) ?? defaults.visibilityWindow
+        if let savedVisibility = try container.decodeIfPresent(MenuVisibilityWindow.self, forKey: .visibilityWindow) {
+            visibilityWindow = savedVisibility
+        } else {
+            visibilityWindow = defaults.visibilityWindow
+            let legacy = try decoder.container(keyedBy: LegacyCodingKeys.self)
+            if let days = try legacy.decodeIfPresent(Int.self, forKey: .visibleWindowDays) {
+                visibilityWindow.days = days
+            }
+        }
         showEventTitlesInMenuBar = try container.decodeIfPresent(Bool.self, forKey: .showEventTitlesInMenuBar) ?? defaults.showEventTitlesInMenuBar
         soundEnabled = try container.decodeIfPresent(Bool.self, forKey: .soundEnabled) ?? defaults.soundEnabled
         urgentRepeatSoundEnabled = try container.decodeIfPresent(Bool.self, forKey: .urgentRepeatSoundEnabled) ?? defaults.urgentRepeatSoundEnabled
         presentationModeDefault = try container.decodeIfPresent(Bool.self, forKey: .presentationModeDefault) ?? defaults.presentationModeDefault
         launchAtLoginEnabled = try container.decodeIfPresent(Bool.self, forKey: .launchAtLoginEnabled) ?? defaults.launchAtLoginEnabled
         wakeGraceEnabled = try container.decodeIfPresent(Bool.self, forKey: .wakeGraceEnabled) ?? defaults.wakeGraceEnabled
-        visibleWindowDays = try container.decodeIfPresent(Int.self, forKey: .visibleWindowDays) ?? defaults.visibleWindowDays
         selectedCalendarIDs = try container.decodeIfPresent(Set<String>.self, forKey: .selectedCalendarIDs) ?? defaults.selectedCalendarIDs
+        hasExplicitCalendarSelection = try container.decodeIfPresent(Bool.self, forKey: .hasExplicitCalendarSelection) ?? !selectedCalendarIDs.isEmpty
+        providerDefaultCalendarIDs = try container.decodeIfPresent(Set<String>.self, forKey: .providerDefaultCalendarIDs)
         disabledGoogleAccountIDs = try container.decodeIfPresent(Set<String>.self, forKey: .disabledGoogleAccountIDs) ?? defaults.disabledGoogleAccountIDs
         accountNicknames = try container.decodeIfPresent([String: String].self, forKey: .accountNicknames) ?? defaults.accountNicknames
         calendarAliases = try container.decodeIfPresent([String: String].self, forKey: .calendarAliases) ?? defaults.calendarAliases
@@ -253,7 +271,8 @@ struct AppSettingsSnapshot: Codable, Equatable, Sendable {
         var copy = self
         copy.defaultLeadTime = Self.normalizedLeadTime(defaultLeadTime)
         copy.globalSnoozeDuration = Self.normalizedSnoozeDuration(globalSnoozeDuration)
-        copy.visibleWindowDays = min(max(visibleWindowDays, 1), 7)
+        copy.visibilityWindow.hours = min(max(visibilityWindow.hours, 1), 12)
+        copy.visibilityWindow.days = min(max(visibilityWindow.days, 1), 7)
         if copy.defaultBrowserSelection.browser == .systemDefault {
             copy.defaultBrowserSelection.profileID = nil
         }
@@ -287,7 +306,34 @@ struct AppSettingsSnapshot: Codable, Equatable, Sendable {
     }
 
     func isCalendarSelected(_ calendarID: String) -> Bool {
-        selectedCalendarIDs.isEmpty || selectedCalendarIDs.contains(calendarID)
+        if hasExplicitCalendarSelection {
+            return selectedCalendarIDs.contains(calendarID)
+        }
+        return providerDefaultCalendarIDs?.contains(calendarID) ?? true
+    }
+
+    func isCalendarSelected(_ calendar: UserCalendar) -> Bool {
+        hasExplicitCalendarSelection ? selectedCalendarIDs.contains(calendar.id) : calendar.isSelected
+    }
+
+    mutating func setCalendarSelected(_ selected: Bool, calendarID: String, availableCalendars: [UserCalendar]) {
+        if !hasExplicitCalendarSelection {
+            selectedCalendarIDs = Set(availableCalendars.filter(\.isSelected).map(\.id))
+        }
+        if selected {
+            selectedCalendarIDs.insert(calendarID)
+        } else {
+            selectedCalendarIDs.remove(calendarID)
+        }
+    }
+
+    mutating func recordProviderDefaultCalendarIDs(_ calendarIDs: Set<String>) {
+        providerDefaultCalendarIDs = calendarIDs
+    }
+
+    mutating func restoreCalendarSelection(from snapshot: AppSettingsSnapshot) {
+        selectedCalendarIDs = snapshot.selectedCalendarIDs
+        hasExplicitCalendarSelection = snapshot.hasExplicitCalendarSelection
     }
 
     func isAccountEnabled(_ accountID: String) -> Bool {
@@ -296,9 +342,7 @@ struct AppSettingsSnapshot: Codable, Equatable, Sendable {
 
     func protectedCalendars(from calendars: [UserCalendar]) -> [UserCalendar] {
         calendars.filter { calendar in
-            calendar.isSelected
-                && isAccountEnabled(calendar.accountID)
-                && isCalendarSelected(calendar.id)
+            isAccountEnabled(calendar.accountID) && isCalendarSelected(calendar)
         }
     }
 
@@ -336,41 +380,96 @@ struct AppSettingsSnapshot: Codable, Equatable, Sendable {
 
 @MainActor
 final class AppSettingsStore: ObservableObject {
-    static let shared = AppSettingsStore()
+    static let shared = AppSettingsStore(preferences: .current)
 
     @Published private(set) var snapshot: AppSettingsSnapshot
+    @Published private(set) var persistenceFailure: PersistenceFailure?
 
-    private let userDefaults: UserDefaults
-    private let key = "meetingShield.settings.v1"
+    private let preferences: SettingsPreferences
+    private var needsRecovery = false
+    private var recoveryEdits = SettingsRecoveryEdits()
 
-    init(userDefaults: UserDefaults = .standard) {
-        self.userDefaults = userDefaults
-        if let data = userDefaults.data(forKey: key),
-           let decoded = try? JSONDecoder().decode(AppSettingsSnapshot.self, from: data) {
-            snapshot = decoded.normalized()
-        } else {
-            snapshot = .defaults
+    convenience init(domainName: String) {
+        self.init(preferences: SettingsPreferences(domainName: domainName))
+    }
+
+    init(preferences: SettingsPreferences) {
+        self.preferences = preferences
+        snapshot = .defaults
+        switch Self.readSnapshot(preferences) {
+        case .success(let saved):
+            snapshot = saved
+        case .failure(let failure):
+            needsRecovery = true
+            setFailure(failure)
         }
     }
 
     func update(_ change: (inout AppSettingsSnapshot) -> Void) {
         var copy = snapshot
         change(&copy)
-        snapshot = copy.normalized()
+        let updated = copy.normalized()
+        if needsRecovery {
+            recoveryEdits.record(from: snapshot, to: updated)
+        }
+        snapshot = updated
         persist()
     }
 
     func restoreDefaults() {
+        needsRecovery = false
+        recoveryEdits = SettingsRecoveryEdits()
         snapshot = .defaults
         persist()
     }
 
+    @discardableResult
+    func retryPersistence() -> Bool {
+        if needsRecovery {
+            switch Self.readSnapshot(preferences) {
+            case .success(var recovered):
+                recoveryEdits.apply(to: &recovered)
+                snapshot = recovered.normalized()
+                needsRecovery = false
+            case .failure(let failure):
+                setFailure(failure)
+                return false
+            }
+        }
+        persist()
+        return persistenceFailure == nil
+    }
+
     private func persist() {
+        guard !needsRecovery else { return }
         do {
             let data = try JSONEncoder().encode(snapshot)
-            userDefaults.set(data, forKey: key)
+            guard preferences.write(data) else {
+                setFailure(.writeFailed)
+                return
+            }
+            setFailure(nil)
+            recoveryEdits = SettingsRecoveryEdits()
         } catch {
-            AppLog.lifecycle.error("settingsPersistFailed error=\(LogPrivacy.errorClass(error), privacy: .public)")
+            setFailure(.writeFailed)
+        }
+    }
+
+    private func setFailure(_ failure: PersistenceFailure?) {
+        guard persistenceFailure != failure else { return }
+        persistenceFailure = failure
+        if let failure {
+            AppLog.lifecycle.error("settingsStorageFailed reason=\(failure.rawValue, privacy: .public)")
+        }
+    }
+
+    private static func readSnapshot(_ preferences: SettingsPreferences) -> Result<AppSettingsSnapshot, PersistenceFailure> {
+        guard let value = preferences.read() else { return .success(.defaults) }
+        guard let data = value as? Data else { return .failure(.invalidData) }
+        do {
+            return .success(try JSONDecoder().decode(AppSettingsSnapshot.self, from: data).normalized())
+        } catch {
+            return .failure(.invalidData)
         }
     }
 }

@@ -36,14 +36,14 @@ enum MockCalendarFixtureMode: String, CaseIterable, Identifiable, Sendable {
 actor MockCalendarProvider: CalendarProvider {
     let providerID = "mock"
     private let fixtureMode: MockCalendarFixtureMode
-    private let now: @Sendable () -> Date
+    private let fixtureAnchor: Date
 
     init(
         fixtureMode: MockCalendarFixtureMode = .defaultMode,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.fixtureMode = fixtureMode
-        self.now = now
+        self.fixtureAnchor = now()
     }
 
     var authState: CalendarProviderAuthState {
@@ -78,7 +78,12 @@ actor MockCalendarProvider: CalendarProvider {
     }
 
     func events(in window: CalendarFetchWindow) async throws -> [CalendarEventOccurrence] {
-        sampleEvents(now: now())
+        sampleEvents(now: fixtureAnchor)
+            .map { event in
+                var stable = event
+                stable.updatedAt = fixtureAnchor
+                return stable
+            }
             .filter { $0.endDate >= window.start && $0.startDate <= window.end }
     }
 

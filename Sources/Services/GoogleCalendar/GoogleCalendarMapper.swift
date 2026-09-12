@@ -19,10 +19,9 @@ struct GoogleCalendarMapper: Sendable {
                 accountDisplayName: accountDisplayName,
                 displayName: item.summaryOverride ?? item.summary,
                 isPrimary: item.primary ?? false,
-                // Google's `selected` mirrors the calendar checkbox in the
-                // Google Calendar UI. Absent flag fails safe toward protection.
                 isSelected: (item.selected ?? true) && !item.hidden,
-                colorHex: item.backgroundColor
+                colorHex: item.backgroundColor,
+                accessRole: item.accessRole
             )
         }
         return (calendars, response.nextPageToken)
@@ -44,7 +43,15 @@ struct GoogleCalendarMapper: Sendable {
 
     func mapEventList(data: Data, calendar: UserCalendar) throws -> (events: [CalendarEventOccurrence], nextPageToken: String?) {
         let response = try JSONDecoder().decode(GoogleEventsResponse.self, from: data)
-        return (response.items.compactMap { mapEvent($0, calendar: calendar) }, response.nextPageToken)
+        var events: [CalendarEventOccurrence] = []
+        for event in response.items {
+            if let occurrence = mapEvent(event, calendar: calendar) {
+                events.append(occurrence)
+            } else if event.status != "cancelled" {
+                throw CalendarProviderError.invalidResponse
+            }
+        }
+        return (events, response.nextPageToken)
     }
 
     func mapEvent(_ event: GoogleEvent, calendar: UserCalendar) -> CalendarEventOccurrence? {

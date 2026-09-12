@@ -10,6 +10,7 @@ final class KeyableAlertWindow: NSWindow {
     override var canBecomeMain: Bool { true }
 
     override func keyDown(with event: NSEvent) {
+        guard !DismissConfirmationWindowController.shared.isShowing else { return }
         if event.keyCode == 53 {
             AppLog.alert.info("windowKeyDown action=escapeIgnored")
             return
@@ -29,7 +30,7 @@ final class KeyableAlertWindow: NSWindow {
 }
 
 @MainActor
-final class FullScreenAlertWindowController {
+final class FullScreenAlertWindowController: FullScreenAlertPresenting {
     static let shared = FullScreenAlertWindowController()
 
     private var windows: [NSWindow] = []
@@ -42,12 +43,32 @@ final class FullScreenAlertWindowController {
         !windows.isEmpty
     }
 
+    var visibleWindowCount: Int { windows.filter(\.isVisible).count }
+    var selectedReminderID: String? { keyTarget?.selectedReminder?.id }
+    var highestVisibleWindowLevel: NSWindow.Level? {
+        windows.filter(\.isVisible).map(\.level).max { $0.rawValue < $1.rawValue }
+    }
+
+    func dismissalConfirmationParent(for reminder: ScheduledReminder) -> NSWindow? {
+        guard keyTarget?.reminders.contains(where: { $0.id == reminder.id }) == true else { return nil }
+        let visibleWindows = windows.filter(\.isVisible)
+        if let keyWindow = NSApp.keyWindow, visibleWindows.contains(where: { $0 === keyWindow }) {
+            return keyWindow
+        }
+        if let eventWindow = NSApp.currentEvent?.window, visibleWindows.contains(where: { $0 === eventWindow }) {
+            return eventWindow
+        }
+        return visibleWindows.first
+    }
+
     func show(
         reminders: [ScheduledReminder],
-        availableSnoozeChoices: @escaping (ScheduledReminder) -> [SnoozeChoice],
+        selectedID: String? = nil,
+        availableSnoozeChoices: @escaping (ScheduledReminder, Date) -> [SnoozeChoice],
         onJoin: @escaping (ScheduledReminder) -> Void,
         onSnooze: @escaping (ScheduledReminder, SnoozeChoice?) -> Void,
         onDismiss: @escaping (ScheduledReminder) -> Void,
+        onRequestDismissal: @escaping (ScheduledReminder) -> Void,
         onMute: @escaping (ScheduledReminder) -> Void,
         onSnoozeAll: @escaping () -> Void
     ) {
@@ -55,6 +76,9 @@ final class FullScreenAlertWindowController {
         hide()
         guard !reminders.isEmpty else { return }
         let keyTarget = AlertKeyTarget(reminders: reminders)
+        if let selectedID, reminders.contains(where: { $0.id == selectedID }) {
+            keyTarget.selectedID = selectedID
+        }
         self.keyTarget = keyTarget
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
@@ -71,12 +95,12 @@ final class FullScreenAlertWindowController {
 
         for (index, screen) in NSScreen.screens.enumerated() {
             let view = MeetingAlertView(
-                reminders: reminders,
                 keyTarget: keyTarget,
                 availableSnoozeChoices: availableSnoozeChoices,
                 onJoin: onJoin,
                 onSnooze: onSnooze,
                 onDismiss: onDismiss,
+                onRequestDismissal: onRequestDismissal,
                 onMute: onMute,
                 onSnoozeAll: onSnoozeAll
             )
@@ -116,6 +140,18 @@ final class FullScreenAlertWindowController {
         AppLog.alert.info("fullScreenShowComplete windows=\(self.windows.count, privacy: .public)")
     }
 
+    func update(reminders: [ScheduledReminder]) {
+        guard !reminders.isEmpty else {
+            hide()
+            return
+        }
+        guard isShowing, let keyTarget else { return }
+        keyTarget.update(reminders: reminders)
+        DiagnosticsRecorder.record("fullscreen_alert_update", metadata: [
+            "reminders": "\(reminders.count)", "windows": "\(windows.count)"
+        ])
+    }
+
     func hide() {
         AppLog.alert.info("fullScreenHideRequested windows=\(self.windows.count, privacy: .public) keyMonitor=\(LogPrivacy.bool(self.keyMonitor != nil), privacy: .public)")
         if !windows.isEmpty {
@@ -127,7 +163,14 @@ final class FullScreenAlertWindowController {
             AppLog.alert.debug("fullScreenKeyMonitorRemoved")
         }
         keyTarget = nil
-        windows.forEach { $0.close() }
+        windows.forEach { window in
+            if let alertWindow = window as? KeyableAlertWindow {
+                alertWindow.onDefaultJoin = nil
+                alertWindow.onDefaultSnooze = nil
+            }
+            window.contentView = nil
+            window.close()
+        }
         windows.removeAll()
         if !SettingsWindowController.shared.isVisible {
             NSApp.setActivationPolicy(.accessory)
@@ -142,6 +185,7 @@ final class FullScreenAlertWindowController {
     ) {
         AppLog.alert.debug("fullScreenKeyMonitorInstalled")
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak keyTarget] event in
+            if DismissConfirmationWindowController.shared.isShowing { return event }
             if event.keyCode == 53 {
                 AppLog.alert.info("localKeyMonitor action=escapeIgnored")
                 return nil

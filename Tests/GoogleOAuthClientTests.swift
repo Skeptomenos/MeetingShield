@@ -123,7 +123,10 @@ struct GoogleOAuthClientTests {
         #expect(remaining.map(\.accountID) == ["second@example.com"])
 
         try client.clearToken()
-        #expect(keychain.valueCount == 0)
+        #expect(keychain.valueCount == 1)
+        let clearedCollection = try #require(keychain.retrieve(forKey: "google.oauth.tokens"))
+        let clearedEnvelope = try JSONDecoder().decode([String: [GoogleOAuthToken]].self, from: Data(clearedCollection.utf8))
+        #expect(clearedEnvelope["tokens"] == [])
         #expect(client.storedTokens().isEmpty)
     }
 

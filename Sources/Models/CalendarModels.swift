@@ -107,6 +107,20 @@ struct UserCalendar: Codable, Hashable, Identifiable, Sendable {
     var isPrimary: Bool
     var isSelected: Bool
     var colorHex: String?
+    var accessRole: String? = nil
+
+    var eventAccessWarning: String? {
+        switch accessRole {
+        case nil, "reader", "writer", "writerWithoutPrivateAccess", "owner":
+            nil
+        case "freeBusyReader":
+            "Limited access: some meeting details are unavailable."
+        case "none":
+            "Calendar access is unavailable. Ask its owner for access."
+        default:
+            "Calendar access could not be verified."
+        }
+    }
 
     var apiCalendarID: String {
         sourceCalendarID ?? id
@@ -117,13 +131,35 @@ struct OccurrenceKey: Codable, Hashable, CustomStringConvertible, Sendable {
     var providerID: String
     var eventID: String
     var originalStartDate: Date?
+    var accountID: String? = nil
+    var calendarID: String? = nil
+
+    var isScoped: Bool { accountID != nil && calendarID != nil }
+    var isLegacy: Bool { accountID == nil && calendarID == nil }
+
+    var legacyKey: OccurrenceKey {
+        OccurrenceKey(providerID: providerID, eventID: eventID, originalStartDate: originalStartDate)
+    }
 
     var description: String {
-        if let originalStartDate {
-            "\(providerID):\(eventID):\(ISO8601DateFormatter.stableString(from: originalStartDate))"
-        } else {
-            "\(providerID):\(eventID)"
+        if isLegacy {
+            if let originalStartDate {
+                return "\(providerID):\(eventID):\(ISO8601DateFormatter.stableString(from: originalStartDate))"
+            }
+            return "\(providerID):\(eventID)"
         }
+        let date = originalStartDate.map { date in
+            let interval = date.timeIntervalSinceReferenceDate
+            return interval == 0 ? "0" : String(interval)
+        }
+        let components: [String?] = [providerID, accountID, calendarID, eventID, date]
+        let encoded = components.map { component in
+            guard let component else { return "-" }
+            let normalized = component.precomposedStringWithCanonicalMapping
+            return "\(normalized.utf8.count):\(normalized)"
+        }.joined()
+        let digest = SHA256.hash(data: Data(encoded.utf8))
+        return "occ-v2:" + digest.map { String(format: "%02x", $0) }.joined()
     }
 }
 
@@ -163,7 +199,13 @@ struct CalendarEventOccurrence: Codable, Hashable, Identifiable, Sendable {
     var id: String { occurrenceKey.description }
 
     var occurrenceKey: OccurrenceKey {
-        OccurrenceKey(providerID: providerID, eventID: eventID, originalStartDate: originalStartDate)
+        OccurrenceKey(
+            providerID: providerID,
+            eventID: eventID,
+            originalStartDate: originalStartDate,
+            accountID: accountID,
+            calendarID: calendarID
+        )
     }
 
     var isCancelled: Bool {
@@ -183,8 +225,6 @@ struct CalendarEventOccurrence: Codable, Hashable, Identifiable, Sendable {
             rsvpStatus.rawValue
         ]
         let joined = pieces.joined(separator: "\u{1f}")
-        // SHA256 so the persisted fingerprint (reminder-state.json) cannot be
-        // reversed into titles/links. Base64 of the raw pieces leaked them.
         let digest = SHA256.hash(data: Data(joined.utf8))
         let hex = digest.map { String(format: "%02x", $0) }.joined()
         return MaterialChangeFingerprint(value: hex)
@@ -208,14 +248,11 @@ enum CalendarProviderAuthState: Equatable, Sendable {
     case expired(reason: String)
 }
 
-struct CalendarFetchWindow: Sendable {
+struct CalendarFetchWindow: Codable, Equatable, Sendable {
     var start: Date
     var end: Date
 
-    /// Lookback so events that started recently still alert/join.
     static let lookback: TimeInterval = 2 * 60 * 60
-    /// TECH.md guarantees a 24-hour offline-protection cache; the fetch window
-    /// must cover at least this horizon regardless of the menu visibility setting.
     static let minimumProtectionHorizon: TimeInterval = 24 * 60 * 60
 
     static func protective(

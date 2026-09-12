@@ -1,8 +1,26 @@
 import Foundation
 
-struct EventCacheEnvelope: Codable, Sendable {
+struct EventCacheEnvelope: Codable, Equatable, Sendable {
     var cachedAt: Date
     var events: [CalendarEventOccurrence]
+    var accounts: [String: CalendarAccountCache]
+
+    init(cachedAt: Date, events: [CalendarEventOccurrence], accounts: [String: CalendarAccountCache] = [:]) {
+        self.cachedAt = cachedAt
+        self.events = events
+        self.accounts = accounts
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case cachedAt, events, accounts
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        cachedAt = try values.decode(Date.self, forKey: .cachedAt)
+        events = try values.decode([CalendarEventOccurrence].self, forKey: .events)
+        accounts = try values.decodeIfPresent([String: CalendarAccountCache].self, forKey: .accounts) ?? [:]
+    }
 }
 
 struct EventCacheStore: Sendable {
@@ -30,38 +48,98 @@ struct EventCacheStore: Sendable {
             event.privacyPreservingCacheCopy(detectedLinks: detectedLinks[event.id] ?? event.conferenceLinks)
         }
         let envelope = EventCacheEnvelope(cachedAt: now, events: privacyCopies)
+        try save(envelope: envelope, settings: settings)
+    }
+
+    func save(envelope: EventCacheEnvelope, settings: AppSettingsSnapshot? = nil) throws {
+        var stored = filteredEnvelope(envelope, settings: settings)
+        let extractor = MeetingLinkExtractor()
+        stored.events = stored.events.map {
+            $0.privacyPreservingCacheCopy(detectedLinks: extractor.extractLinks(from: $0))
+        }
         try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let data = try JSONEncoder().encode(envelope)
+        let data = try JSONEncoder().encode(stored)
         try data.write(to: fileURL, options: [.atomic])
     }
 
     func load(
         now: Date = Date(),
-        visibleWindowDays: Int = 1,
+        retentionDays: Int = 1,
         settings: AppSettingsSnapshot? = nil
     ) throws -> EventCacheEnvelope? {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
-        let data = try Data(contentsOf: fileURL)
-        let envelope = try JSONDecoder().decode(EventCacheEnvelope.self, from: data)
-        let retained = retainedEvents(
-            filteredEvents(envelope.events, settings: settings),
-            now: now,
-            visibleWindowDays: visibleWindowDays
-        )
-        return EventCacheEnvelope(cachedAt: envelope.cachedAt, events: retained)
+        guard let envelope = try loadUnfiltered() else { return nil }
+        return retainedSnapshot(envelope, now: now, retentionDays: retentionDays, settings: settings)
+    }
+
+    func retainedSnapshot(
+        _ envelope: EventCacheEnvelope,
+        now: Date,
+        retentionDays: Int,
+        settings: AppSettingsSnapshot?
+    ) -> EventCacheEnvelope {
+        var retained = filteredEnvelope(envelope, settings: settings)
+        retained.events = retainedEvents(retained.events, now: now, retentionDays: retentionDays)
+        return retained
+    }
+
+    private func filteredEnvelope(_ envelope: EventCacheEnvelope, settings: AppSettingsSnapshot?) -> EventCacheEnvelope {
+        guard let settings else { return envelope }
+        var filtered = envelope
+        filtered.events = filteredEvents(envelope.events, settings: settings)
+        filtered.accounts = envelope.accounts.filter { settings.isAccountEnabled($0.key) }
+        for accountID in filtered.accounts.keys {
+            guard var entry = filtered.accounts[accountID], var coverage = entry.coverage else { continue }
+            coverage.calendarIDs = coverage.calendarIDs.filter { settings.isCalendarSelected($0) }
+            entry.coverage = coverage
+            filtered.accounts[accountID] = entry
+        }
+        return filtered
+    }
+
+    func loadUnfiltered() throws -> EventCacheEnvelope? {
+        guard var envelope = try readEnvelope() else { return nil }
+        var resolved: [OccurrenceKey: CalendarEventOccurrence] = [:]
+        var events: [CalendarEventOccurrence] = []
+        for event in envelope.events {
+            if let previous = resolved[event.occurrenceKey] {
+                guard previous == event else {
+                    throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "Conflicting cached occurrences."))
+                }
+            } else {
+                resolved[event.occurrenceKey] = event
+                events.append(event)
+            }
+        }
+        envelope.events = events
+        return envelope
+    }
+
+    func loadLegacyIdentityEvidence() throws -> [CalendarEventOccurrence] {
+        try readEnvelope()?.events ?? []
+    }
+
+    private func readEnvelope() throws -> EventCacheEnvelope? {
+        let data: Data
+        do {
+            data = try Data(contentsOf: fileURL)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            return nil
+        }
+        return try JSONDecoder().decode(EventCacheEnvelope.self, from: data)
     }
 
     func retainedEvents(
         _ events: [CalendarEventOccurrence],
         now: Date,
-        visibleWindowDays: Int
+        retentionDays: Int
     ) -> [CalendarEventOccurrence] {
         let retentionStart = now.addingTimeInterval(-2 * 60 * 60)
-        let retentionEnd = calendar.date(
+        let calendarEnd = calendar.date(
             byAdding: .day,
-            value: min(max(visibleWindowDays, 1), 7),
+            value: min(max(retentionDays, 1), 7),
             to: now
         ) ?? now.addingTimeInterval(24 * 60 * 60)
+        let retentionEnd = max(calendarEnd, now.addingTimeInterval(CalendarFetchWindow.minimumProtectionHorizon))
 
         return events.filter { event in
             event.endDate >= retentionStart && event.startDate <= retentionEnd

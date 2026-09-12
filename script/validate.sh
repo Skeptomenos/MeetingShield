@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Meeting Shield single validation gate.
-# One deterministic, indivisible command that defines "done".
-# Stages: build -> test -> smoke -> drift. No credentials, no network.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -20,44 +17,42 @@ fail() {
   exit 1
 }
 
-# --- Stage 1: build -------------------------------------------------------
 stage "build"
 swift build --package-path "$ROOT_DIR" || fail "swift build failed"
 
-# --- Stage 2: tests -------------------------------------------------------
 stage "test"
-swift test --package-path "$ROOT_DIR" || fail "swift test failed"
+TEST_USER_HOME="$(mktemp -d "$ROOT_DIR/.build/test-home.XXXXXX")"
+CFFIXED_USER_HOME="$TEST_USER_HOME" swift test --package-path "$ROOT_DIR" || fail "swift test failed"
 
-# --- Stage 3: smoke (production artifact, documented entry point) ---------
 stage "smoke"
 "$ROOT_DIR/script/assemble_app.sh" --skip-local-credentials >/dev/null || fail "app bundle assembly failed"
 [[ -x "$APP_BINARY" ]] || fail "assembled bundle is missing executable at $APP_BINARY"
 
-SMOKE_OUTPUT="$("$APP_BINARY" --smoke-test 2>/dev/null)" || fail "smoke binary exited non-zero"
+SMOKE_USER_HOME="$(mktemp -d "$ROOT_DIR/.build/smoke-home.XXXXXX")"
+SMOKE_OUTPUT="$(CFFIXED_USER_HOME="$SMOKE_USER_HOME" "$APP_BINARY" --smoke-test 2>/dev/null)" || fail "smoke binary exited non-zero"
 if [[ "$SMOKE_OUTPUT" != *"Meeting Shield smoke launch OK"* ]]; then
   fail "smoke output missing marker. got: $SMOKE_OUTPUT"
 fi
 
-# --- Stage 4: drift checks ------------------------------------------------
+stage "runtime fallback"
+RUNTIME_OUTPUT_DIR="$(mktemp -d "$ROOT_DIR/.build/runtime-fallback.XXXXXX")/evidence"
+"$ROOT_DIR/script/assert_runtime_fallback.sh" --app-bundle "$APP_BUNDLE" --output-dir "$RUNTIME_OUTPUT_DIR" --scenario all || fail "native runtime fallback check failed or is BLOCKED; evidence: $RUNTIME_OUTPUT_DIR"
+
 stage "drift"
-# Documented commands must exist and be executable.
-for doc_cmd in "script/validate.sh" "script/build_and_run.sh" "script/assemble_app.sh"; do
+for doc_cmd in "script/validate.sh" "script/build_and_run.sh" "script/assemble_app.sh" "script/assert_runtime_fallback.sh"; do
   [[ -x "$ROOT_DIR/$doc_cmd" ]] || fail "documented command missing or not executable: $doc_cmd"
 done
-# AGENTS.md must reference the gate so future agents find it.
 grep -q "validate.sh" "$ROOT_DIR/AGENTS.md" || fail "AGENTS.md does not reference script/validate.sh"
-# The deterministic (credential-free) bundle must not embed OAuth credentials.
 if /usr/libexec/PlistBuddy -c "Print :MSGoogleOAuthClientID" "$INFO_PLIST" >/dev/null 2>&1; then
   fail "credential-free smoke bundle contains MSGoogleOAuthClientID"
 fi
 if /usr/libexec/PlistBuddy -c "Print :MSGoogleOAuthClientSecret" "$INFO_PLIST" >/dev/null 2>&1; then
   fail "credential-free smoke bundle contains MSGoogleOAuthClientSecret"
 fi
-# No machine-specific absolute paths in sources or scripts (pattern split to avoid self-match).
 HOME_PATH_PATTERN='/Users/'
 if grep -rn "$HOME_PATH_PATTERN" "$ROOT_DIR/Sources" "$ROOT_DIR/script" --include="*.swift" --include="*.sh" --exclude="validate.sh" 2>/dev/null; then
   fail "machine-specific absolute path found in Sources/ or script/"
 fi
 
 echo ""
-echo "GATE PASSED: build, test, smoke, drift all green."
+echo "GATE PASSED: build, test, smoke, runtime fallback, drift all green."

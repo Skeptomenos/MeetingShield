@@ -3,14 +3,40 @@ import Foundation
 protocol CalendarProvider: Sendable {
     var providerID: String { get }
     var authState: CalendarProviderAuthState { get async }
+    var credentialPersistenceFailures: Set<GoogleOAuthPersistenceFailure> { get async }
+    func retryCredentialPersistence() async
 
     func accounts() async -> [ConnectedCalendarAccount]
     func calendars() async throws -> [UserCalendar]
+    func calendarCatalog() async throws -> CalendarCatalog
     func events(in window: CalendarFetchWindow) async throws -> [CalendarEventOccurrence]
     func refresh(in window: CalendarFetchWindow) async throws -> [CalendarEventOccurrence]
     func refresh(in window: CalendarFetchWindow, calendars: [UserCalendar]) async throws -> [CalendarEventOccurrence]
+    func refreshResult(
+        in window: CalendarFetchWindow,
+        calendars: [UserCalendar],
+        accountIDs: Set<String>
+    ) async throws -> CalendarRefreshResult
     func reconnect() async throws
     func removeAccount(id: String) async throws
+}
+
+extension CalendarProvider {
+    var credentialPersistenceFailures: Set<GoogleOAuthPersistenceFailure> { [] }
+
+    func retryCredentialPersistence() async {}
+
+    func refreshResult(
+        in window: CalendarFetchWindow,
+        calendars: [UserCalendar],
+        accountIDs: Set<String>
+    ) async throws -> CalendarRefreshResult {
+        .complete(try await refresh(in: window, calendars: calendars))
+    }
+
+    func calendarCatalog() async throws -> CalendarCatalog {
+        CalendarCatalog(calendars: try await calendars(), isComplete: true)
+    }
 }
 
 enum CalendarProviderError: Error, LocalizedError, Sendable {

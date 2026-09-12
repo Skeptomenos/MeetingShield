@@ -13,6 +13,7 @@ struct GoogleCalendarListItem: Decodable {
     var selected: Bool?
     var hidden: Bool
     var backgroundColor: String?
+    var accessRole: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -22,6 +23,7 @@ struct GoogleCalendarListItem: Decodable {
         case selected
         case hidden
         case backgroundColor
+        case accessRole
     }
 
     init(from decoder: Decoder) throws {
@@ -33,6 +35,7 @@ struct GoogleCalendarListItem: Decodable {
         selected = try container.decodeIfPresent(Bool.self, forKey: .selected)
         hidden = try container.decodeIfPresent(Bool.self, forKey: .hidden) ?? false
         backgroundColor = try container.decodeIfPresent(String.self, forKey: .backgroundColor)
+        accessRole = try container.decodeIfPresent(String.self, forKey: .accessRole)
     }
 }
 
@@ -69,7 +72,6 @@ struct GoogleEvent: Decodable {
         case location
         case eventType
         case iCalUID
-        // Google's API field is `recurringEventId` (lowercase d).
         case recurringEventID = "recurringEventId"
         case start
         case end

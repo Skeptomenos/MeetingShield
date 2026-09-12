@@ -125,6 +125,12 @@ extension SettingsView {
                     }
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(LiquidGlassTheme.secondaryText)
+                    if let warning = calendar.eventAccessWarning {
+                        Text(warning)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     let menuLabel = store.snapshot.displayName(for: calendar)
                     if menuLabel != calendar.displayName {
                         Text("Menu label: \(menuLabel)")
@@ -196,17 +202,14 @@ extension SettingsView {
 
     func calendarSelectedBinding(_ calendarID: String) -> Binding<Bool> {
         Binding {
-            store.snapshot.isCalendarSelected(calendarID)
+            if let calendar = controller.calendars.first(where: { $0.id == calendarID }) {
+                store.snapshot.isCalendarSelected(calendar)
+            } else {
+                store.snapshot.isCalendarSelected(calendarID)
+            }
         } set: { isSelected in
             updateSettings { settings in
-                if settings.selectedCalendarIDs.isEmpty {
-                    settings.selectedCalendarIDs = Set(controller.calendars.map(\.id))
-                }
-                if isSelected {
-                    settings.selectedCalendarIDs.insert(calendarID)
-                } else {
-                    settings.selectedCalendarIDs.remove(calendarID)
-                }
+                settings.setCalendarSelected(isSelected, calendarID: calendarID, availableCalendars: controller.calendars)
             }
         }
     }

@@ -1,18 +1,16 @@
 import SwiftUI
 
 struct MeetingAlertView: View {
-    var reminders: [ScheduledReminder]
     @ObservedObject var keyTarget: AlertKeyTarget
-    var availableSnoozeChoices: (ScheduledReminder) -> [SnoozeChoice]
+    var availableSnoozeChoices: (ScheduledReminder, Date) -> [SnoozeChoice]
     var onJoin: (ScheduledReminder) -> Void
     var onSnooze: (ScheduledReminder, SnoozeChoice?) -> Void
     var onDismiss: (ScheduledReminder) -> Void
+    var onRequestDismissal: (ScheduledReminder) -> Void
     var onMute: (ScheduledReminder) -> Void
     var onSnoozeAll: () -> Void
 
-    private var selectedReminder: ScheduledReminder {
-        keyTarget.selectedReminder ?? reminders[0]
-    }
+    private var reminders: [ScheduledReminder] { keyTarget.reminders }
 
     var body: some View {
         ZStack {
@@ -23,20 +21,24 @@ struct MeetingAlertView: View {
                 .opacity(0.48)
                 .ignoresSafeArea()
 
-            VStack(spacing: 16) {
-                if reminders.count > 1 {
-                    overlapSelector
-                }
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                VStack(spacing: 16) {
+                    if reminders.count > 1 {
+                        overlapSelector(now: context.date)
+                    }
 
-                alertCard(for: selectedReminder)
-                    .frame(maxWidth: 780)
+                    if let selectedReminder = keyTarget.selectedReminder {
+                        alertCard(for: selectedReminder, now: context.date)
+                            .frame(maxWidth: 780)
+                    }
+                }
+                .padding(44)
             }
-            .padding(44)
         }
         .onExitCommand {}
     }
 
-    private var overlapSelector: some View {
+    private func overlapSelector(now: Date) -> some View {
         HStack(spacing: 8) {
             HStack(spacing: 6) {
                 ForEach(reminders) { reminder in
@@ -74,13 +76,14 @@ struct MeetingAlertView: View {
                     .frame(height: 30)
             }
             .buttonStyle(LiquidAlertButtonStyle(kind: .secondary, minWidth: 118))
+            .disabled(reminders.allSatisfy { availableSnoozeChoices($0, now).isEmpty })
             .accessibilityLabel("Snooze all visible meetings")
             .accessibilityValue("Snooze all visible meetings")
-            .accessibilityHint("Hides every visible meeting alert until its next safe reminder time")
+            .accessibilityHint("Snoozes meetings that can still return safely; imminent meetings stay visible")
         }
     }
 
-    private func alertCard(for reminder: ScheduledReminder) -> some View {
+    private func alertCard(for reminder: ScheduledReminder, now: Date) -> some View {
         VStack(spacing: 0) {
             VStack(spacing: 16) {
                 HStack(spacing: 8) {
@@ -105,7 +108,7 @@ struct MeetingAlertView: View {
                     .foregroundStyle(.white.opacity(0.96))
                     .frame(maxWidth: .infinity)
 
-                metadataRow(for: reminder)
+                metadataRow(for: reminder, now: now)
 
                 if reminder.event.isFromCache {
                     Label("Calendar data may be stale", systemImage: "exclamationmark.triangle")
@@ -151,21 +154,23 @@ struct MeetingAlertView: View {
                     }
                     .buttonStyle(LiquidAlertButtonStyle(kind: .secondary, minWidth: 180))
                     .keyboardShortcut("s", modifiers: [])
-                    .disabled(availableSnoozeChoices(reminder).isEmpty)
+                    .disabled(availableSnoozeChoices(reminder, now).isEmpty)
                     .accessibilityLabel("Snooze reminder")
                     .accessibilityValue("Snooze reminder")
                     .accessibilityHint("Uses the default snooze duration")
                 }
 
-                snoozeChoices(for: reminder)
+                snoozeChoices(for: reminder, now: now)
             }
             .padding(.horizontal, 34)
             .padding(.vertical, 22)
 
             HStack(spacing: 14) {
-                DismissHoldButton(hasOverlappingReminders: reminders.count > 1) {
-                    onDismiss(reminder)
-                }
+                DismissHoldButton(
+                    hasOverlappingReminders: reminders.count > 1,
+                    action: { onDismiss(reminder) },
+                    requestConfirmation: { onRequestDismissal(reminder) }
+                )
                 Button {
                     onMute(reminder)
                 } label: {
@@ -206,8 +211,8 @@ struct MeetingAlertView: View {
     }
 
     @ViewBuilder
-    private func snoozeChoices(for reminder: ScheduledReminder) -> some View {
-        let choices = availableSnoozeChoices(reminder)
+    private func snoozeChoices(for reminder: ScheduledReminder, now: Date) -> some View {
+        let choices = availableSnoozeChoices(reminder, now)
         if !choices.isEmpty {
             HStack(spacing: 8) {
                 ForEach(choices, id: \.label) { choice in
@@ -252,15 +257,12 @@ struct MeetingAlertView: View {
         return "\(time) · \(countdown)"
     }
 
-    private func metadataRow(for reminder: ScheduledReminder) -> some View {
+    private func metadataRow(for reminder: ScheduledReminder, now: Date) -> some View {
         VStack(spacing: 7) {
             HStack(spacing: 12) {
-                // Alerts stay on screen for minutes; the countdown must tick.
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    Label(timeLine(for: reminder, now: context.date), systemImage: "clock")
-                        .font(.system(size: 18, weight: .semibold, design: .rounded).monospacedDigit())
-                        .fixedSize(horizontal: true, vertical: false)
-                }
+                Label(timeLine(for: reminder, now: now), systemImage: "clock")
+                    .font(.system(size: 18, weight: .semibold, design: .rounded).monospacedDigit())
+                    .fixedSize(horizontal: true, vertical: false)
                 if let meetingRoom = meetingRoomLabel(for: reminder) {
                     metadataDivider
                     Label(meetingRoom, systemImage: "mappin.and.ellipse")
@@ -341,6 +343,7 @@ struct MeetingAlertView: View {
 struct DismissHoldButton: View {
     var hasOverlappingReminders: Bool
     var action: () -> Void
+    var requestConfirmation: () -> Void
     @State private var isPressing = false
 
     private var title: String {
@@ -349,9 +352,9 @@ struct DismissHoldButton: View {
 
     private var accessibilityHint: String {
         if hasOverlappingReminders {
-            return "Long press for one second to dismiss this event occurrence. Other overlapping meetings will remain visible."
+            return "Opens confirmation before dismissing this event occurrence. Other overlapping meetings will remain visible."
         }
-        return "Long press for one second to dismiss this event occurrence and close the alert."
+        return "Opens confirmation before dismissing this event occurrence and closing the alert."
     }
 
     var body: some View {
@@ -366,23 +369,28 @@ struct DismissHoldButton: View {
                     .stroke(isPressing ? .red.opacity(0.36) : .white.opacity(0.08), lineWidth: 1)
             }
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .focusable()
+            .onKeyPress(.space) {
+                requestConfirmation()
+                return .handled
+            }
             .onLongPressGesture(minimumDuration: 1.0, maximumDistance: 80) {
                 action()
             } onPressingChanged: { pressing in
                 isPressing = pressing
             }
-            .accessibilityLabel("Hold to dismiss this event")
-            .accessibilityValue("Hold to dismiss this event")
+            .accessibilityLabel("Dismiss this event")
+            .accessibilityValue("Confirmation required")
             .accessibilityHint(accessibilityHint)
             .accessibilityElement(children: .ignore)
             .accessibilityAddTraits(.isButton)
             .accessibilityAction {
-                action()
+                requestConfirmation()
             }
             .accessibilityRepresentation {
-                Button("Hold to dismiss this event", action: action)
-                    .accessibilityLabel("Hold to dismiss this event")
-                    .accessibilityValue("Hold to dismiss this event")
+                Button("Dismiss this event", action: requestConfirmation)
+                    .accessibilityLabel("Dismiss this event")
+                    .accessibilityValue("Confirmation required")
                     .accessibilityHint(accessibilityHint)
             }
     }

@@ -3,15 +3,22 @@ import SwiftUI
 
 struct MenuContentView: View {
     static let preferredWidth: CGFloat = 292
-    static let fixedHeightExcludingAgendaRows: CGFloat = 450
+    static let fixedHeightExcludingAgendaRows: CGFloat = 506
     static let agendaRowHeight: CGFloat = 26
+    static let persistenceWarningHeight: CGFloat = 26
+    static let notificationWarningHeight: CGFloat = 36
 
     @ObservedObject var controller: MeetingShieldController
     var popoverHeight: CGFloat
+    var closeMenu: @MainActor () -> Void = { MenuBarController.shared.closePopover() }
     @State private var selectedMonth = Date()
 
-    static func preferredHeight(eventCount: Int) -> CGFloat {
+    static func preferredHeight(
+        eventCount: Int, hasPersistenceWarning: Bool = false, hasNotificationWarning: Bool = false
+    ) -> CGFloat {
         fixedHeightExcludingAgendaRows + CGFloat(eventCount) * agendaRowHeight
+            + (hasPersistenceWarning ? persistenceWarningHeight : 0)
+            + (hasNotificationWarning ? notificationWarningHeight : 0)
     }
 
     var body: some View {
@@ -48,45 +55,101 @@ struct MenuContentView: View {
         .background(LiquidGlassTheme.popoverFill)
     }
 
-    @ViewBuilder
     private var statusSection: some View {
-        if let warning = controller.notificationWarning {
-            Label(warning, systemImage: "bell.slash.circle")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(LiquidGlassTheme.warning)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-        } else if let status = controller.statusMessage {
-            Label(status, systemImage: "exclamationmark.triangle")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(LiquidGlassTheme.warning)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-        } else if case .disconnected = controller.authState {
-            Label("Connect Google Calendar", systemImage: "calendar.badge.plus")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(LiquidGlassTheme.warning)
-        } else if case .needsConfiguration = controller.authState {
-            Label("Google Calendar needs setup", systemImage: "gearshape")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(LiquidGlassTheme.warning)
-        } else if case .authenticating = controller.authState {
-            Label("Connecting Google Calendar", systemImage: "arrow.clockwise")
-                .font(.system(size: 12, weight: .semibold))
+        let summary = controller.protectionHealthSummary
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Label(summary.title, systemImage: healthSystemImage(summary.level))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(healthColor(summary.level))
+                Spacer(minLength: 4)
+                Button {
+                    controller.copyProtectionSummary()
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                }
+                .buttonStyle(.plain)
                 .foregroundStyle(LiquidGlassTheme.secondaryText)
-        } else if case .expired = controller.authState {
-            Label("Reconnect Google Calendar", systemImage: "exclamationmark.triangle")
-                .font(.system(size: 12, weight: .semibold))
+                .help("Copy protection summary")
+                .accessibilityLabel("Copy protection summary")
+            }
+            Text(summary.coverageText)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(LiquidGlassTheme.secondaryText)
+                .lineLimit(1)
+            Text(summary.scheduleText)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(LiquidGlassTheme.secondaryText)
+                .lineLimit(1)
+            if !summary.actions.isEmpty {
+                HStack(spacing: 10) {
+                    ForEach(summary.actions, id: \.rawValue) { action in
+                        Button(action.rawValue) {
+                            controller.performProtectionHealthAction(action)
+                        }
+                        .font(.system(size: 10, weight: .semibold))
+                        .buttonStyle(.plain)
+                        .foregroundStyle(LiquidGlassTheme.accent)
+                    }
+                }
+            }
+            if !controller.persistenceWarnings.isEmpty {
+                Button("Storage needs attention", systemImage: "exclamationmark.triangle") {
+                    controller.openSettings()
+                }
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(LiquidGlassTheme.warning)
-        } else if controller.isPresentationMode {
-            Label("Presentation mode", systemImage: "bell.slash")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(LiquidGlassTheme.secondaryText)
-        } else {
-            Label("Protecting meetings", systemImage: "checkmark.shield")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(LiquidGlassTheme.secondaryText)
+                .buttonStyle(.plain)
+                .help("Review unsaved data and retry storage in Settings")
+                .accessibilityIdentifier("persistence-warning-settings")
+            }
+            if let warning = controller.notificationWarning {
+                Label(warning, systemImage: "bell.slash.circle")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(LiquidGlassTheme.warning)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let status = controller.statusMessage {
+                Label(status, systemImage: "exclamationmark.triangle")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(LiquidGlassTheme.warning)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if case .disconnected = controller.authState {
+                Label("Connect Google Calendar", systemImage: "calendar.badge.plus")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(LiquidGlassTheme.warning)
+            } else if case .needsConfiguration = controller.authState {
+                Label("Google Calendar needs setup", systemImage: "gearshape")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(LiquidGlassTheme.warning)
+            } else if case .authenticating = controller.authState {
+                Label("Connecting Google Calendar", systemImage: "arrow.clockwise")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(LiquidGlassTheme.secondaryText)
+            } else if case .expired = controller.authState {
+                Label("Reconnect Google Calendar", systemImage: "exclamationmark.triangle")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(LiquidGlassTheme.warning)
+            } else if controller.isPresentationMode {
+                Label("Presentation mode", systemImage: "bell.slash")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(LiquidGlassTheme.secondaryText)
+            }
         }
+    }
+
+    private func healthSystemImage(_ level: ProtectionHealthSummary.Level) -> String {
+        switch level {
+        case .healthy: "checkmark.shield"
+        case .partial: "exclamationmark.shield"
+        case .unavailable: "xmark.shield"
+        }
+    }
+
+    private func healthColor(_ level: ProtectionHealthSummary.Level) -> Color {
+        level == .healthy ? LiquidGlassTheme.secondaryText : LiquidGlassTheme.warning
     }
 
     private var reconnectTitle: String {
@@ -153,12 +216,22 @@ struct MenuContentView: View {
                                     .truncationMode(.tail)
                                     .layoutPriority(1)
                                 Spacer(minLength: 0)
-                                Text(controller.displayCalendarName(for: event))
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(LiquidGlassTheme.secondaryText)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                    .frame(width: 86, alignment: .trailing)
+                                if controller.canAlertAgain(event) {
+                                    Button("Alert Again") {
+                                        closeMenu()
+                                        controller.alertAgain(event)
+                                    }
+                                    .font(.caption)
+                                    .accessibilityLabel("Alert again for \(event.title)")
+                                    .help("Restore this meeting's alert")
+                                } else {
+                                    Text(controller.displayCalendarName(for: event))
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundStyle(LiquidGlassTheme.secondaryText)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                        .frame(width: 86, alignment: .trailing)
+                                }
                             }
                             .frame(height: Self.agendaRowHeight - 8)
                         }
@@ -171,7 +244,9 @@ struct MenuContentView: View {
 
     private func agendaListHeight(eventCount: Int) -> CGFloat {
         let desiredHeight = CGFloat(eventCount) * Self.agendaRowHeight
-        let availableHeight = max(Self.agendaRowHeight, popoverHeight - Self.fixedHeightExcludingAgendaRows)
+        let warningHeight = (controller.persistenceWarnings.isEmpty ? 0 : Self.persistenceWarningHeight)
+            + (controller.notificationWarning == nil ? 0 : Self.notificationWarningHeight)
+        let availableHeight = max(Self.agendaRowHeight, popoverHeight - Self.fixedHeightExcludingAgendaRows - warningHeight)
         return min(desiredHeight, availableHeight)
     }
 

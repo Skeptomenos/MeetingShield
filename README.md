@@ -49,6 +49,12 @@ After that works, wire in Google Calendar OAuth and real event polling.
 
 ## Current MVP
 
+Historical readiness check, 2026-09-07: all 18 core reliability steps and 46 installed-app acceptance cases passed independent verification on September 4. The later legacy-token catalog correction passes the complete 507-test gate and CI. Its fresh signed installation, relaunch refreshes, and visible Protection read-back pass; [focused installed evidence](_planning/2026-09-07-installed-healthcheck.md) records the exact artifact, preservation checks, and limits.
+
+Current review correction, 2026-09-12: notification latency must not delay acquisition or revive scheduling after Stop. See [focused repair evidence](_planning/2026-09-12-stale-preflight-repair.md) for current validation and the boundary between synthetic lifecycle proof and historical installed-app evidence. The September 7 artifact is not evidence for later code changes.
+
+See the [repair and acceptance plan](_planning/plans/2026-08-31-close-capability-and-reliability-gaps.md) for the core proof and delivery status. Broader customization, extended dogfood, and full-spec sign-off remain in DEV-153 through DEV-161.
+
 The app now has a SwiftPM-first native macOS implementation:
 
 - Menu bar app shell with cached agenda, next-meeting title/countdown, Presentation mode toggle, settings, Google reconnect, and new-event action.
@@ -81,16 +87,30 @@ The connection flow follows [Google's installed desktop guidance](https://develo
 ## Build, Run, Test
 
 ```bash
-./script/validate.sh          # full gate: build, tests, smoke, drift — the definition of done
-swift test                    # fast iteration
+./script/validate.sh
+swift test
 swift build
-./script/build_and_run.sh     # assemble dist/MeetingShield.app and launch it
+./script/build_and_run.sh
 ./script/build_and_run.sh --verify
 ```
 
 `./script/build_and_run.sh` stages the SwiftPM executable into `dist/MeetingShield.app` (via `./script/assemble_app.sh`) and launches that bundle. The Codex Run action is wired to the same script through `.codex/environments/environment.toml`.
 
 There is no Xcode project in this MVP. Use SwiftPM commands unless an Xcode project is added later for signing, assets, notarization, or distribution packaging.
+
+### Native runtime regression
+
+The full gate builds, tests, assembles the app, runs entrypoint smoke, exercises five native Join/fallback scenarios, and checks drift. Tests and smoke use fresh isolated homes so default local stores do not change app data in the user's home. The native stage needs an interactive Mac with WindowServer and valid bundle identity. It shows synthetic windows for about 80 seconds, uses fresh isolated app homes, and records browser requests without opening them. It does not connect accounts, request notification permission, or replace the installed app.
+
+To check an already assembled bundle, choose an output directory that does not exist:
+
+```bash
+./script/assert_runtime_fallback.sh --app-bundle dist/MeetingShield.app --output-dir .build/runtime-manual-001 --scenario all
+```
+
+Use the wrapper, not the internal app argument. It owns the child PID, validates binary identity, sets the isolated home, enforces deadlines, and retains evidence. Timeout, explicit close, reopen, dismiss and overlap cases must complete the real window/timer lifecycle and show a later native alert before exiting normally. Process loss, missing checkpoints and unavailable prerequisites fail the gate. Exit 78 means blocked environment or identity evidence, not a pass.
+
+For native lifetime diagnosis, use `--scenario timeout --zombies` and a fresh output directory. Even a successful instrumented run exits 3 and is diagnostic-only; repeat normally for acceptance. Retained output uses synthetic data. These checks do not replace rendered-button, browser, account, wake or installed-app acceptance.
 
 ## Code Signing
 
@@ -108,3 +128,6 @@ Without it, builds fall back to ad-hoc signing with a warning.
 - OAuth tokens are stored in Keychain.
 - Event cache is local and strips descriptions after link extraction.
 - Normal app code should not log tokens, meeting titles, descriptions, attendees, meeting links, or raw Google API bodies.
+- Reminder state is scoped to its account and calendar. After an upgrade, old actions whose source cannot be proven may alert again; the app retains those old records for eight days without suppressing another meeting. Settings, cache format and raw Google event IDs remain unchanged.
+- Newly emitted diagnostic records accept only known events, fields and bounded operational values. Unknown text is omitted or replaced by a fixed code before the same JSON payload goes to Unified Logging and local JSONL. Existing log history is not retroactively scrubbed and may contain earlier unsafe output. Audited direct Unified Logging calls use fixed text, counts or safe error/identifier helpers; new calls still require privacy review.
+- Local diagnostics retain `diagnostics.jsonl` and `diagnostics.previous.jsonl`, each at most 256 KiB, with a 2 KiB limit per encoded record including its newline. Rotation happens before the next record would exceed the limit. These bounds cover app-controlled regular files after a successful write. Unsafe filesystem entries are preserved and further writes stop with a safe native error. Oversized old diagnostic files are discarded or replaced; settings, tokens, cache and reminder state are not affected. No cloud telemetry is added.

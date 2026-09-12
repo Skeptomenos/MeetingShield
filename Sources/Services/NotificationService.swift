@@ -10,10 +10,27 @@ struct MeetingNotification: Sendable {
     var withSound: Bool = false
 }
 
+struct NotificationSettingsSnapshot: Equatable, Sendable {
+    var authorizationStatus: UNAuthorizationStatus
+    var alertSetting: UNNotificationSetting? = nil
+    var alertStyle: UNAlertStyle? = nil
+    var scheduledDeliverySetting: UNNotificationSetting? = nil
+}
+
 protocol MeetingNotifying: Sendable {
     func authorizationStatus() async -> UNAuthorizationStatus
+    func notificationSettings() async -> NotificationSettingsSnapshot
     func requestAuthorization() async throws -> Bool
     func deliver(_ notification: MeetingNotification) async throws
+    @MainActor func setResponseHandler(_ handler: (@MainActor @Sendable (String) -> Void)?)
+}
+
+extension MeetingNotifying {
+    func notificationSettings() async -> NotificationSettingsSnapshot {
+        NotificationSettingsSnapshot(authorizationStatus: await authorizationStatus())
+    }
+
+    @MainActor func setResponseHandler(_ handler: (@MainActor @Sendable (String) -> Void)?) {}
 }
 
 struct NoopNotificationService: MeetingNotifying {
@@ -26,6 +43,8 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Mee
     static let shared = NotificationService()
 
     private let center: UNUserNotificationCenter
+    private let responseLock = NSLock()
+    private var responseHandler: (@MainActor @Sendable (String) -> Void)?
 
     init(center: UNUserNotificationCenter = .current()) {
         self.center = center
@@ -33,8 +52,23 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Mee
         center.delegate = self
     }
 
+    @MainActor
+    func setResponseHandler(_ handler: (@MainActor @Sendable (String) -> Void)?) {
+        responseLock.withLock { responseHandler = handler }
+    }
+
     func authorizationStatus() async -> UNAuthorizationStatus {
         await center.notificationSettings().authorizationStatus
+    }
+
+    func notificationSettings() async -> NotificationSettingsSnapshot {
+        let settings = await center.notificationSettings()
+        return NotificationSettingsSnapshot(
+            authorizationStatus: settings.authorizationStatus,
+            alertSetting: settings.alertSetting,
+            alertStyle: settings.alertStyle,
+            scheduledDeliverySetting: settings.scheduledDeliverySetting
+        )
     }
 
     func requestAuthorization() async throws -> Bool {
@@ -70,10 +104,9 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Mee
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
-        // Clicking a meeting notification brings Meeting Shield forward so the
-        // user can act on the reminder. Deep-link join is a tracked follow-up.
-        await MainActor.run {
-            NSApp.activate(ignoringOtherApps: true)
-        }
+        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier else { return }
+        let identifier = response.notification.request.identifier
+        let handler = responseLock.withLock { responseHandler }
+        await handler?(identifier)
     }
 }

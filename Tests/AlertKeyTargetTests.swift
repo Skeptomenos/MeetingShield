@@ -35,7 +35,7 @@ struct AlertKeyTargetTests {
 
         target.selectedID = reminders[1].id
 
-        #expect(target.selectedReminder?.id == "mock:second")
+        #expect(target.selectedReminder?.id == reminders[1].id)
     }
 
     @Test("Selection falls back to first when the selected reminder disappears")
@@ -46,7 +46,7 @@ struct AlertKeyTargetTests {
 
         target.update(reminders: [reminder("first")])
 
-        #expect(target.selectedReminder?.id == "mock:first")
+        #expect(target.selectedReminder?.id == reminders[0].id)
     }
 
     @Test("Empty reminder list yields no target")

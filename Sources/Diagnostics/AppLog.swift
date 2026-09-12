@@ -8,6 +8,17 @@ enum AppLog {
         Bundle.main.bundleIdentifier ?? fallbackSubsystem
     }
 
+    static func recordDiagnostic(_ level: DiagnosticsRecorder.Level, _ payload: String) {
+        switch level {
+        case .info:
+            recorder.info("\(payload, privacy: .public)")
+        case .error:
+            recorder.error("\(payload, privacy: .public)")
+        }
+    }
+
+    private static let recorder = Logger(subsystem: AppIdentity.bundleIdentifier, category: "diagnostics")
+
     static let lifecycle = Logger(subsystem: subsystem, category: "Lifecycle")
     static let refresh = Logger(subsystem: subsystem, category: "Refresh")
     static let alert = Logger(subsystem: subsystem, category: "Alert")

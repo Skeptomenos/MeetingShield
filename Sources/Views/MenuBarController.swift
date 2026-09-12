@@ -30,6 +30,15 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         popover.performClose(nil)
     }
 
+    func showPopover() {
+        guard let button = statusItem.button else { return }
+        updatePopoverSize()
+        if !popover.isShown {
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        }
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     @objc private func togglePopover(_ sender: NSStatusBarButton) {
         if NSApp.currentEvent?.type == .rightMouseUp {
             showContextMenu(from: sender)
@@ -39,16 +48,18 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         if popover.isShown {
             closePopover()
         } else {
-            updatePopoverSize()
-            popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
-            NSApp.activate(ignoringOtherApps: true)
+            showPopover()
         }
     }
 
     private func updateButton() {
         guard let controller, let button = statusItem.button else { return }
         button.image = NSImage(systemSymbolName: controller.menuBarSystemImage, accessibilityDescription: "Meeting Shield")
-        button.title = controller.menuBarTitle == AppIdentity.menuBarTitle ? "" : " \(controller.menuBarTitle)"
+        let text = controller.menuBarText.resolved { value in
+            let font = button.font ?? NSFont.menuBarFont(ofSize: 0)
+            return NSString(string: " \(value)").size(withAttributes: [.font: font]).width
+        }
+        button.title = text == AppIdentity.menuBarTitle ? "" : " \(text)"
         button.target = self
         button.action = #selector(togglePopover(_:))
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -97,7 +108,10 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
 
     private func updatePopoverSize() {
         let eventCount = controller?.menuEvents.count ?? 0
-        let preferredHeight = MenuContentView.preferredHeight(eventCount: eventCount)
+        let preferredHeight = MenuContentView.preferredHeight(
+            eventCount: eventCount, hasPersistenceWarning: controller?.persistenceWarnings.isEmpty == false,
+            hasNotificationWarning: controller?.notificationWarning != nil
+        )
         let height = min(preferredHeight, maximumVisiblePopoverHeight())
         popover.contentSize = NSSize(
             width: MenuContentView.preferredWidth,

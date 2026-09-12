@@ -25,7 +25,7 @@ struct EventCacheStoreTests {
         )
 
         try store.save(events: [current, old], detectedLinks: [current.id: [link], old.id: []], now: TestDates.now)
-        let loaded = try #require(try store.load(now: TestDates.now, visibleWindowDays: 1))
+        let loaded = try #require(try store.load(now: TestDates.now, retentionDays: 1))
 
         #expect(loaded.events.count == 1)
         #expect(loaded.events[0].eventDescription == nil)
@@ -79,7 +79,7 @@ struct EventCacheStoreTests {
 
         let loaded = try #require(try store.load(
             now: TestDates.now,
-            visibleWindowDays: 1,
+            retentionDays: 1,
             settings: settings
         ))
         #expect(loaded.events.map(\.eventID) == ["selected"])
@@ -121,7 +121,7 @@ struct EventCacheStoreTests {
 
         let loaded = try #require(try store.load(
             now: TestDates.now,
-            visibleWindowDays: 1,
+            retentionDays: 1,
             settings: settings
         ))
 

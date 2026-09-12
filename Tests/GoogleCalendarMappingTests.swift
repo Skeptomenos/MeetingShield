@@ -4,6 +4,21 @@ import Testing
 
 @Suite("Google Calendar mapping")
 struct GoogleCalendarMappingTests {
+    @Test("Calendar access metadata survives mapping and storage without changing visibility", arguments: ["reader", "writerWithoutPrivateAccess", "freeBusyReader", "none", "futureRole"])
+    func calendarAccessMetadataSurvivesMapping(role: String) throws {
+        let data = Data("""
+        {"items":[{"id":"synthetic-access-calendar","summary":"Synthetic access","selected":true,"accessRole":"\(role)"}]}
+        """.utf8)
+        let mapped = try GoogleCalendarMapper().mapCalendarList(data: data, accountID: "synthetic-account").calendars
+        let calendars = try JSONDecoder().decode([UserCalendar].self, from: JSONEncoder().encode(mapped))
+        let encoded = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(calendars)) as? [[String: Any]])
+
+        #expect(encoded.first?["accessRole"] as? String == role)
+        #expect((calendars.first?.eventAccessWarning != nil) == ["freeBusyReader", "none", "futureRole"].contains(role))
+        #expect(calendars.first?.isSelected == true)
+        #expect(AppSettingsSnapshot.defaults.protectedCalendars(from: calendars).map(\.id) == mapped.map(\.id))
+    }
+
     @Test("Maps event types RSVP all-day free conference metadata recurrence and cancelled events")
     func mapsGoogleEvents() throws {
         let calendar = UserCalendar(id: "primary", accountID: "acct", accountDisplayName: "Account", displayName: "Work", isPrimary: true, isSelected: true, colorHex: nil)

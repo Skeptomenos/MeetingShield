@@ -2,12 +2,15 @@ import Foundation
 import Security
 
 enum KeychainError: Error, LocalizedError {
+    case readFailed(OSStatus)
     case saveFailed(OSStatus)
     case deleteFailed(OSStatus)
     case unexpectedData
 
     var errorDescription: String? {
         switch self {
+        case .readFailed(let status):
+            "Failed to read from Keychain (status: \(status))."
         case .saveFailed(let status):
             "Failed to save to Keychain (status: \(status))."
         case .deleteFailed(let status):
@@ -18,19 +21,33 @@ enum KeychainError: Error, LocalizedError {
     }
 }
 
-protocol KeychainStoring: Sendable {
+protocol KeychainStoring: AnyObject, Sendable {
+    var oauthMutationState: GoogleOAuthMutationState { get }
     func save(_ value: String, forKey key: String) throws
+    func read(forKey key: String) throws -> String?
     func retrieve(forKey key: String) -> String?
     func delete(forKey key: String) throws
+}
+
+extension KeychainStoring {
+    var oauthMutationState: GoogleOAuthMutationState {
+        GoogleOAuthMutationState.shared(store: self)
+    }
+
+    func read(forKey key: String) throws -> String? {
+        retrieve(forKey: key)
+    }
 }
 
 final class KeychainService: KeychainStoring {
     static let shared = KeychainService()
 
     private let service: String
+    let oauthMutationState: GoogleOAuthMutationState
 
     init(service: String = AppIdentity.keychainServiceName) {
         self.service = service
+        self.oauthMutationState = GoogleOAuthMutationState.shared(service: service)
     }
 
     func save(_ value: String, forKey key: String) throws {
@@ -62,6 +79,10 @@ final class KeychainService: KeychainStoring {
     }
 
     func retrieve(forKey key: String) -> String? {
+        try? read(forKey: key)
+    }
+
+    func read(forKey key: String) throws -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -72,10 +93,11 @@ final class KeychainService: KeychainStoring {
 
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess,
-              let data = result as? Data,
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess else { throw KeychainError.readFailed(status) }
+        guard let data = result as? Data,
               let value = String(data: data, encoding: .utf8) else {
-            return nil
+            throw KeychainError.unexpectedData
         }
         return value
     }

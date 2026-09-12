@@ -9,8 +9,6 @@ final class SystemEventMonitor: ObservableObject {
     @Published private(set) var wakeGraceUntil: Date?
 
     var onWakeOrUnlock: (@MainActor () -> Void)?
-    /// Fired when network connectivity returns after an offline period
-    /// (TECH.md: refresh on network return).
     var onNetworkReturn: (@MainActor () -> Void)?
 
     private var observers: [NSObjectProtocol] = []
@@ -18,7 +16,7 @@ final class SystemEventMonitor: ObservableObject {
     private var pathMonitor: NWPathMonitor?
     private var lastPathSatisfied: Bool?
 
-    private init() {}
+    init() {}
 
     func start() {
         guard observers.isEmpty else { return }
@@ -37,8 +35,6 @@ final class SystemEventMonitor: ObservableObject {
         ) { [weak self] _ in
             Task { @MainActor in self?.enterWakeGrace() }
         })
-        // Screen unlock without sleep (lock screen) — distributed notification,
-        // not covered by didWake.
         distributedObservers.append(DistributedNotificationCenter.default().addObserver(
             forName: Notification.Name("com.apple.screenIsUnlocked"),
             object: nil,
@@ -82,7 +78,6 @@ final class SystemEventMonitor: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 defer { self.lastPathSatisfied = satisfied }
-                // Only offline → online transitions trigger a refresh.
                 if satisfied, self.lastPathSatisfied == false {
                     AppLog.refresh.info("networkReturned")
                     DiagnosticsRecorder.record("network_returned")

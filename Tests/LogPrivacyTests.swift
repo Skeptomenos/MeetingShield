@@ -47,7 +47,6 @@ struct LogPrivacyTests {
 
     @Test("Error class scrubbing drops embedded URLs and emails")
     func errorClassDropsEmbeddedDetails() {
-        // Calendar API URLs contain calendar IDs, which are email addresses.
         let url = URL(string: "https://www.googleapis.com/calendar/v3/calendars/alice@example.com/events")!
         let error = URLError(.timedOut, userInfo: [
             NSURLErrorFailingURLErrorKey: url,
@@ -58,7 +57,41 @@ struct LogPrivacyTests {
 
         #expect(!scrubbed.contains("alice@example.com"))
         #expect(!scrubbed.contains("googleapis.com"))
-        // URLError with userInfo bridges to NSError; domain.code is the stable, content-free form.
         #expect(scrubbed == "NSURLErrorDomain.-1001")
     }
+
+    @Test("Untrusted NSError domains and Swift error names are not public codes")
+    func untrustedErrorIdentifiersAreUnknown() {
+        let canary = "private-domain-\(UUID().uuidString)@example.invalid"
+        let error = NSError(domain: canary, code: 19, userInfo: [NSLocalizedDescriptionKey: canary])
+        #expect(LogPrivacy.errorClass(error) == "unknown")
+        #expect(LogPrivacy.safeErrorCode("\(canary).19") == "unknown")
+        #expect(LogPrivacy.safeErrorCode("NSURLErrorDomain.-1001 private-token") == "unknown")
+        #expect(LogPrivacy.safeErrorCode("NSCocoaErrorDomain.004") == "unknown")
+        #expect(LogPrivacy.safeErrorCode("NSPOSIXErrorDomain.+13") == "unknown")
+    }
+
+    @Test("Known Swift errors use fixed codes without associated values")
+    func knownErrorCodesAreStable() {
+        let canary = "private-associated-value-\(UUID().uuidString)"
+        #expect(LogPrivacy.errorClass(CalendarProviderError.authExpired(canary)) == "calendar_auth_expired")
+        #expect(LogPrivacy.errorClass(GoogleOAuthError.authorizationDenied(canary)) == "oauth_authorization_denied")
+        #expect(LogPrivacy.errorClass(GoogleOAuthError.tokenExchangeFailed(status: 400, googleError: canary)) == "oauth_token_exchange_failed")
+        #expect(LogPrivacy.errorClass(MeetingLauncherError.launchFailed(canary)) == "launch_failed")
+        #expect(LogPrivacy.errorClass(KeychainError.unexpectedData) == "keychain_unexpected_data")
+        #expect(LogPrivacy.errorClass(CancellationError()) == "cancelled")
+        #expect(LogPrivacy.safeErrorCode("calendar_auth_expired") == "calendar_auth_expired")
+    }
+
+    @Test("Only fixed refresh reasons and OAuth errors reach diagnostics")
+    func externalStringCodesAreBounded() {
+        let canary = "https://example.invalid/\(UUID().uuidString)"
+        #expect(LogPrivacy.refreshReason(canary) == "unknown")
+        #expect(LogPrivacy.refreshReason("network-return") == "network-return")
+        #expect(LogPrivacy.refreshReason("runtime-check") == "runtime-check")
+        #expect(LogPrivacy.oauthErrorCode(canary) == "unknown")
+        #expect(LogPrivacy.oauthErrorCode("invalid_grant") == "invalid_grant")
+        #expect(LogPrivacy.oauthErrorCode("access_denied") == "access_denied")
+    }
+
 }

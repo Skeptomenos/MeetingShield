@@ -4,6 +4,80 @@ import Testing
 
 @Suite("Reminder state")
 struct ReminderStateStoreTests {
+    @Test("A shortened snooze survives restart and a later reschedule")
+    func clampedSnoozePersistsWithoutExtending() throws {
+        let directory = try TestTempDirectory.make()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appending(path: "reminder-state.json")
+        let store = ReminderStateStore(fileURL: fileURL)
+        var event = CalendarEventOccurrence.sample(eventID: "rescheduled", title: "Synthetic rescheduled meeting", startDate: TestDates.now.addingTimeInterval(600))
+        let originalDeadline = TestDates.now.addingTimeInterval(300)
+        store.snooze(event.occurrenceKey, until: originalDeadline, now: TestDates.now)
+        event.startDate = TestDates.now.addingTimeInterval(60)
+        let deadline = event.startDate.addingTimeInterval(-10)
+
+        store.reconcileSnoozes(events: [event], now: TestDates.now)
+
+        #expect(store.state(for: event.occurrenceKey)?.snoozedUntil == deadline)
+        let restarted = ReminderStateStore(fileURL: fileURL)
+        #expect(restarted.state(for: event.occurrenceKey)?.snoozedUntil == deadline)
+        event.startDate = TestDates.now.addingTimeInterval(1200)
+        let before = try Data(contentsOf: fileURL)
+        let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+
+        restarted.reconcileSnoozes(events: [event], now: TestDates.now.addingTimeInterval(55))
+
+        #expect(restarted.state(for: event.occurrenceKey)?.snoozedUntil == deadline)
+        #expect(try Data(contentsOf: fileURL) == before)
+        #expect(try FileManager.default.attributesOfItem(atPath: fileURL.path)[.modificationDate] as? Date == attributes[.modificationDate] as? Date)
+    }
+
+    @Test("Snooze clamp failure keeps safe memory and retries unchanged state")
+    func failedClampWriteRetriesWithoutLosingSafety() throws {
+        let directory = try TestTempDirectory.make()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appending(path: "reminder-state.json")
+        let store = ReminderStateStore(fileURL: fileURL)
+        let event = CalendarEventOccurrence.sample(eventID: "clamp-write-failure", title: "Synthetic failed write", startDate: TestDates.now.addingTimeInterval(60))
+        let deadline = event.startDate.addingTimeInterval(-10)
+        store.snooze(event.occurrenceKey, until: TestDates.now.addingTimeInterval(300), now: TestDates.now)
+        try FileManager.default.removeItem(at: fileURL)
+        try FileManager.default.createDirectory(at: fileURL, withIntermediateDirectories: false)
+
+        store.reconcileSnoozes(events: [event], now: TestDates.now)
+
+        #expect(store.state(for: event.occurrenceKey)?.snoozedUntil == deadline)
+        #expect(store.isPersistencePending)
+        try FileManager.default.removeItem(at: fileURL)
+        store.reconcileSnoozes(events: [event], now: TestDates.now.addingTimeInterval(1))
+
+        #expect(!store.isPersistencePending)
+        #expect(ReminderStateStore(fileURL: fileURL).state(for: event.occurrenceKey)?.snoozedUntil == deadline)
+    }
+
+    @Test("Reconciliation changes only a matching scoped snooze and preserves other state")
+    func clampPreservesOtherSourcesAndActions() {
+        let event = CalendarEventOccurrence.sample(eventID: "shared", title: "Synthetic scoped meeting", startDate: TestDates.now.addingTimeInterval(60))
+        var other = event
+        other.accountID = "other-account"
+        let store = ReminderStateStore()
+        let oldDeadline = TestDates.now.addingTimeInterval(300)
+        let fingerprint = event.materialFingerprint(detectedLinks: [])
+        store.dismiss(event.occurrenceKey, fingerprint: fingerprint, now: TestDates.now)
+        store.muteUntilEventEnd(event.occurrenceKey, now: TestDates.now)
+        for key in [event.occurrenceKey, other.occurrenceKey, event.occurrenceKey.legacyKey] {
+            store.snooze(key, until: oldDeadline, now: TestDates.now)
+        }
+
+        store.reconcileSnoozes(events: [event], now: TestDates.now)
+
+        #expect(store.state(for: event.occurrenceKey)?.snoozedUntil == event.startDate.addingTimeInterval(-10))
+        #expect(store.isDismissed(event.occurrenceKey, currentFingerprint: fingerprint))
+        #expect(store.state(for: event.occurrenceKey)?.mutedUntilEventEnd == true)
+        #expect(store.state(for: other.occurrenceKey)?.snoozedUntil == oldDeadline)
+        #expect(store.state(for: event.occurrenceKey.legacyKey)?.snoozedUntil == oldDeadline)
+    }
+
     @Test("Dismiss resets on material changes but not description-only changes")
     func dismissalFingerprintBehavior() {
         let event = CalendarEventOccurrence.sample(
@@ -59,8 +133,7 @@ struct ReminderStateStoreTests {
 
         let store = ReminderStateStore(fileURL: fileURL)
 
-        // Must not trap; either entry is acceptable, the store just has one.
-        #expect(store.state(for: key) != nil)
+        #expect(store.state(for: key) == newer)
     }
 
     @Test("Prune drops stale entries but keeps active occurrence keys")

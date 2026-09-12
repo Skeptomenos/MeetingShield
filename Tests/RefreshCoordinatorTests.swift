@@ -2,7 +2,6 @@ import Foundation
 import Testing
 @testable import MeetingShield
 
-/// Controllable fake provider for refresh state-machine tests.
 final class FakeCalendarProvider: CalendarProvider, @unchecked Sendable {
     let providerID = "fake"
     private let lock = NSLock()
@@ -14,7 +13,6 @@ final class FakeCalendarProvider: CalendarProvider, @unchecked Sendable {
     private var _refreshCallCount = 0
     private var _inFlightCount = 0
     private var _maxConcurrentRefreshes = 0
-    /// Set to make refresh suspend until resumed, for re-entrancy tests.
     var refreshDelayNanoseconds: UInt64 = 0
 
     var refreshCallCount: Int { lock.withLock { _refreshCallCount } }
@@ -123,12 +121,19 @@ struct RefreshCoordinatorTests {
         _ = await coordinator.refresh(reason: "seed-cache")
         provider.refreshError = CalendarProviderError.requestFailed(500)
         let first = await coordinator.refresh(reason: "fail-1")
+        #expect(!coordinator.isProtectionStale)
         let second = await coordinator.refresh(reason: "fail-2")
 
         #expect(first?.didSucceed == false)
         #expect(first?.events?.map(\.eventID) == ["cached"])
         #expect(first?.events?.allSatisfy(\.isFromCache) == true)
         #expect(second?.statusMessage == "Calendar refresh is failing; using local cache.")
+        #expect(coordinator.isProtectionStale)
+
+        provider.refreshError = nil
+        let recovered = await coordinator.refresh(reason: "recovered")
+        #expect(recovered?.didSucceed == true)
+        #expect(!coordinator.isProtectionStale)
     }
 
     @Test("Auth expiry sets expired state and keeps protecting from cache")
@@ -207,8 +212,8 @@ struct ReminderPipelineTests {
             now: TestDates.now
         )
 
-        #expect(result.scheduled.map(\.id).sorted() == ["mock:later", "mock:soon"])
-        #expect(result.due.map(\.id) == ["mock:soon"])
+        #expect(result.scheduled.map(\.id).sorted() == [later.id, eligible.id].sorted())
+        #expect(result.due.map(\.id) == [eligible.id])
     }
 
     @Test("Snoozed reminders return at the snooze date, dismissed ones never")
@@ -227,7 +232,7 @@ struct ReminderPipelineTests {
             now: TestDates.now
         )
 
-        #expect(result.scheduled.map(\.id) == ["mock:snoozed"])
+        #expect(result.scheduled.map(\.id) == [snoozed.id])
         #expect(result.scheduled[0].isSnoozed)
         #expect(result.scheduled[0].fireDate == TestDates.now.addingTimeInterval(60))
         #expect(result.due.isEmpty)
@@ -250,7 +255,7 @@ struct ReminderPresentationDecisionTests {
     func fullScreenByDefault() {
         let decision = ReminderPresentationDecision.decide(
             due: [reminder("a")],
-            previousIDs: [],
+            previous: [],
             isPresentationMode: false,
             inWakeGrace: false,
             alertAlreadyShowing: false
@@ -264,7 +269,7 @@ struct ReminderPresentationDecisionTests {
         for (presentation, grace) in [(true, false), (false, true), (true, true)] {
             let decision = ReminderPresentationDecision.decide(
                 due: [reminder("a")],
-                previousIDs: [],
+                previous: [],
                 isPresentationMode: presentation,
                 inWakeGrace: grace,
                 alertAlreadyShowing: false
@@ -278,7 +283,7 @@ struct ReminderPresentationDecisionTests {
         let due = [reminder("a")]
         let decision = ReminderPresentationDecision.decide(
             due: due,
-            previousIDs: due.map(\.id),
+            previous: due,
             isPresentationMode: false,
             inWakeGrace: false,
             alertAlreadyShowing: true
@@ -291,7 +296,7 @@ struct ReminderPresentationDecisionTests {
     func emptyDueSetClears() {
         let decision = ReminderPresentationDecision.decide(
             due: [],
-            previousIDs: ["mock:a"],
+            previous: [reminder("a")],
             isPresentationMode: false,
             inWakeGrace: false,
             alertAlreadyShowing: true

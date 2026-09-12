@@ -99,6 +99,7 @@ struct SettingsView: View {
     private var content: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                PersistenceRecoverySection(controller: controller)
                 switch selectedPane {
                 case .general:
                     menuBarSection
@@ -264,7 +265,7 @@ struct SettingsView: View {
                 }
                 SettingsDivider()
                 SettingsRow {
-                    Stepper("Days: \(store.snapshot.visibleWindowDays)", value: intBinding(\.visibleWindowDays), in: 1...7)
+                    Stepper("Days: \(store.snapshot.visibilityWindow.days)", value: intBinding(\.visibilityWindow.days), in: 1...7)
                         .controlSize(.small)
                 }
                 SettingsDivider()
@@ -415,4 +416,3 @@ struct SettingsView: View {
         controller.handleSettingsChanged()
     }
 }
-

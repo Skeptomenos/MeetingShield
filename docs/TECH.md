@@ -120,6 +120,8 @@ On wake/unlock:
 
 ## Test Strategy
 
+On the audited macOS 27 environment, `CFFIXED_USER_HOME` isolates app data paths but does not isolate the normal macOS preference domain. Unit tests use unique UserDefaults suites. Interactive P04 fixtures use temporary bundle identifiers and preference domains, with synthetic configuration and cleanup read-back; they do not establish installed-app signing or permission acceptance. Evidence: `_planning/2026-08-31-p04-evidence.md`.
+
 Use unit tests for deterministic services:
 
 - Link extraction.

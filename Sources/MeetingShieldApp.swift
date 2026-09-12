@@ -6,6 +6,9 @@ struct MeetingShieldApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     init() {
+        if RuntimeFallbackCheck.isRequested || RuntimePresentationCheck.isRequested {
+            RuntimeFallbackCheck.requireIsolatedHome()
+        }
         ProcessInfo.processInfo.disableAutomaticTermination("Meeting Shield continuously monitors meeting reminders.")
         ProcessInfo.processInfo.disableSuddenTermination()
         AppLog.lifecycle.info("applicationInitialized automaticTerminationDisabled=true suddenTerminationDisabled=true")
@@ -21,10 +24,25 @@ struct MeetingShieldApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var runtimeCheck: RuntimeFallbackCheck?
+    private var presentationCheck: RuntimePresentationCheck?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppLog.lifecycle.info("applicationDidFinishLaunching bundle=\(Bundle.main.bundleIdentifier ?? "missing", privacy: .public) smoke=\(CommandLine.arguments.contains("--smoke-test"), privacy: .public)")
         NSApp.setActivationPolicy(.accessory)
         DiagnosticsRecorder.record("launch_complete")
+        if RuntimePresentationCheck.isRequested {
+            let check = RuntimePresentationCheck()
+            presentationCheck = check
+            Task { await check.run() }
+            return
+        }
+        if RuntimeFallbackCheck.isRequested {
+            let check = RuntimeFallbackCheck()
+            runtimeCheck = check
+            Task { await check.run() }
+            return
+        }
         if CommandLine.arguments.contains("--smoke-test") {
             AppLog.lifecycle.info("smokeTestLaunch")
             print("Meeting Shield smoke launch OK")
@@ -34,6 +52,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureMainMenu()
         MenuBarController.shared.configure(controller: MeetingShieldController.shared)
         MeetingShieldController.shared.start()
+#if DEBUG
+        if CommandLine.arguments.contains("--show-menu") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { MenuBarController.shared.showPopover() }
+        }
+#endif
         DispatchQueue.main.async { [weak self] in
             self?.configureMainMenu()
         }
@@ -48,7 +71,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         AppLog.lifecycle.info("applicationWillTerminate")
         DiagnosticsRecorder.record("application_will_terminate")
-        MeetingShieldController.shared.stop()
+        if !RuntimeFallbackCheck.isRequested && !RuntimePresentationCheck.isRequested {
+            MeetingShieldController.shared.stop()
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
