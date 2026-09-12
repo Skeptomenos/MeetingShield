@@ -3,27 +3,31 @@ import SwiftUI
 
 extension SettingsView {
     var calendarsSection: some View {
-        SettingsSection(title: "Calendars") {
-            if controller.calendars.isEmpty {
+        VStack(alignment: .leading, spacing: 24) {
+            if connectedAccounts.isEmpty {
                 SettingsCard {
-                    SettingsRow(title: "No calendars")
+                    SettingsRow(title: "Your calendars will appear here", subtitle: "Connect a Google account to start protecting your meetings.")
                 }
-            } else {
-                VStack(alignment: .leading, spacing: 12) {
-                    ForEach(calendarsGroupedByAccount, id: \.account.id) { group in
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(store.snapshot.displayName(for: group.account))
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(LiquidGlassTheme.secondaryText)
-                                .padding(.leading, 2)
-                            SettingsCard {
-                                ForEach(Array(group.calendars.enumerated()), id: \.element.id) { index, calendar in
-                                    calendarRow(calendar)
-                                    if index < group.calendars.count - 1 {
-                                        SettingsDivider()
-                                    }
-                                }
-                            }
+            }
+            ForEach(calendarsGroupedByAccount, id: \.account.id) { group in
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(store.snapshot.displayName(for: group.account)).font(.system(size: 15, weight: .medium))
+                            Text(accountSubtitle(group.account)).font(.system(size: 11)).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Manage") { managingAccount = group.account }
+                            .buttonStyle(.plain).foregroundStyle(ShieldTheme.accent)
+                            .accessibilityLabel("Manage \(store.snapshot.displayName(for: group.account))")
+                    }
+                    SettingsCard {
+                        if group.calendars.isEmpty {
+                            SettingsRow(title: "No calendars available", subtitle: "Reconnect or check this account’s calendar access.")
+                        }
+                        ForEach(Array(group.calendars.enumerated()), id: \.element.id) { index, calendar in
+                            calendarRow(calendar)
+                            if index < group.calendars.count - 1 { SettingsDivider() }
                         }
                     }
                 }
@@ -31,160 +35,124 @@ extension SettingsView {
         }
     }
 
-    var accountsSection: some View {
-        SettingsSection(title: "Accounts") {
+    private func accountSubtitle(_ account: ConnectedCalendarAccount) -> String {
+        let status = store.snapshot.isAccountEnabled(account.id) ? "Active" : "Account paused"
+        return "\(status) · \(account.displayName)"
+    }
+
+    func accountDetails(_ account: ConnectedCalendarAccount) -> some View {
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(store.snapshot.displayName(for: account)).font(.title2.weight(.medium))
+                Text(account.displayName).font(.callout).foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Account name").font(.system(size: 12))
+                TextField("Account name", text: accountNicknameBinding(account.id)).shieldTextField()
+            }
             SettingsCard {
-                if connectedAccounts.isEmpty {
-                    SettingsRow(title: "No connected accounts")
-                } else {
-                    ForEach(Array(connectedAccounts.enumerated()), id: \.element.id) { index, account in
-                        accountRow(account)
-                        if index < connectedAccounts.count - 1 {
-                            SettingsDivider()
-                        }
-                    }
+                SettingsRow(title: "Use this account", subtitle: "Pausing keeps its calendar choices for later.") {
+                    CompactSwitch(isOn: accountEnabledBinding(account.id), accessibilityLabel: "Account active")
                 }
             }
-        }
-    }
-
-    func accountRow(_ account: ConnectedCalendarAccount) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center, spacing: 16) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(store.snapshot.displayName(for: account))
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(LiquidGlassTheme.primaryText)
-                        .lineLimit(1)
-                    if store.snapshot.displayName(for: account) != account.displayName {
-                        Text(account.displayName)
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(LiquidGlassTheme.tertiaryText)
-                            .lineLimit(1)
-                    }
-                    Text(store.snapshot.isAccountEnabled(account.id) ? "Active" : "Deactivated")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(LiquidGlassTheme.secondaryText)
-                }
-                Spacer(minLength: 12)
-                CompactSwitch(isOn: accountEnabledBinding(account.id), accessibilityLabel: "Account active")
-                Button("Remove", role: .destructive) {
-                    controller.removeConnectedAccount(account.id)
-                }
-                .buttonStyle(SmallGlassButtonStyle(role: .destructive, minWidth: 64))
+            Button("Reconnect Google Calendar") { managingAccount = nil; controller.reconnectGoogle() }
+                .disabled(!controller.hasGoogleOAuthClientConfiguration)
+            DisclosureGroup("Remove account") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Stops reminders from this account. Your Google calendars are unchanged.").font(.callout).foregroundStyle(.secondary)
+                    Button("Remove this account…", role: .destructive) { accountPendingRemoval = account }
+                }.padding(.top, 8)
             }
-            TextField("Nickname for primary calendar", text: accountNicknameBinding(account.id))
-                .glassTextField()
+            HStack { Spacer(); Button("Done") { managingAccount = nil }.keyboardShortcut(.defaultAction) }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
+        .padding(26).frame(width: 420).background(ShieldTheme.window)
+        .alert("Remove this account?", isPresented: Binding(get: { accountPendingRemoval != nil }, set: { if !$0 { accountPendingRemoval = nil } })) {
+            Button("Cancel", role: .cancel) { accountPendingRemoval = nil }
+            Button("Remove account", role: .destructive) {
+                if let account = accountPendingRemoval { controller.removeConnectedAccount(account.id) }
+                accountPendingRemoval = nil
+                managingAccount = nil
+            }
+        } message: {
+            Text("Meeting Shield will stop protecting its calendars. Your Google calendars will stay unchanged.")
+        }
     }
 
     var connectedAccounts: [ConnectedCalendarAccount] {
         var byID = Dictionary(controller.accounts.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
-        for calendar in controller.calendars {
-            byID[calendar.accountID] = ConnectedCalendarAccount(
-                id: calendar.accountID,
-                displayName: calendar.accountDisplayName ?? calendar.accountID
-            )
+        for calendar in controller.calendars where byID[calendar.accountID] == nil {
+            byID[calendar.accountID] = ConnectedCalendarAccount(id: calendar.accountID, displayName: calendar.accountDisplayName ?? calendar.accountID)
         }
-        return byID.values.sorted { first, second in
-            store.snapshot.displayName(for: first).localizedCaseInsensitiveCompare(store.snapshot.displayName(for: second)) == .orderedAscending
+        return byID.values.sorted {
+            store.snapshot.displayName(for: $0).localizedCaseInsensitiveCompare(store.snapshot.displayName(for: $1)) == .orderedAscending
         }
     }
 
     var calendarsGroupedByAccount: [(account: ConnectedCalendarAccount, calendars: [UserCalendar])] {
-        let accounts = connectedAccounts
-        return accounts.compactMap { account in
-            let calendars = controller.calendars
-                .filter { $0.accountID == account.id }
-                .sorted { first, second in
-                    if first.isPrimary != second.isPrimary {
-                        return first.isPrimary
-                    }
-                    return first.displayName.localizedCaseInsensitiveCompare(second.displayName) == .orderedAscending
-                }
-            guard !calendars.isEmpty else { return nil }
-            return (account, calendars)
+        connectedAccounts.map { account in
+            (account, controller.calendars.filter { $0.accountID == account.id }.sorted {
+                if $0.isPrimary != $1.isPrimary { return $0.isPrimary }
+                return $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+            })
         }
     }
 
     func calendarRow(_ calendar: UserCalendar) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center, spacing: 16) {
+        let isEnabled = store.snapshot.isAccountEnabled(calendar.accountID)
+        let expanded = expandedCalendarIDs.contains(calendar.id)
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                Image(systemName: "calendar").font(.system(size: 17)).foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(calendar.displayName)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(LiquidGlassTheme.primaryText)
-                        .lineLimit(1)
-                    HStack(spacing: 6) {
-                        if calendar.isPrimary {
-                            Text("Primary")
-                        }
-                        Text(store.snapshot.calendarSettings(for: calendar.id).isAlertEnabled ? "Alerts enabled" : "Alerts off")
-                    }
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(LiquidGlassTheme.secondaryText)
-                    if let warning = calendar.eventAccessWarning {
-                        Text(warning)
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    let menuLabel = store.snapshot.displayName(for: calendar)
-                    if menuLabel != calendar.displayName {
-                        Text("Menu label: \(menuLabel)")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(LiquidGlassTheme.tertiaryText)
-                            .lineLimit(1)
-                    }
+                    Text(store.snapshot.displayName(for: calendar))
+                        .font(.system(size: 13, weight: .medium)).lineLimit(2)
+                    if calendar.isPrimary { Text("Primary calendar").font(.system(size: 11)).foregroundStyle(.secondary) }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                Picker("Calendar mode", selection: calendarModeBinding(calendar)) {
+                    ForEach(CalendarDisplayMode.allCases) { mode in Text(mode.rawValue).tag(mode) }
                 }
-                Spacer(minLength: 12)
-                VStack(alignment: .trailing, spacing: 7) {
-                    HStack(spacing: 7) {
-                        Text("On")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(LiquidGlassTheme.tertiaryText)
-                        CompactSwitch(isOn: calendarSelectedBinding(calendar.id), accessibilityLabel: "Calendar enabled")
-                            .disabled(!store.snapshot.isAccountEnabled(calendar.accountID))
-                    }
-                    HStack(spacing: 7) {
-                        Text("Alerts")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(LiquidGlassTheme.tertiaryText)
-                        CompactSwitch(isOn: calendarAlertsBinding(calendar.id), accessibilityLabel: "Calendar alerts")
-                            .disabled(!store.snapshot.isAccountEnabled(calendar.accountID))
-                    }
-                }
+                .labelsHidden().frame(width: 144).disabled(!isEnabled)
+                .accessibilityLabel("\(calendar.displayName) mode")
+                Button {
+                    if expanded { expandedCalendarIDs.remove(calendar.id) } else { expandedCalendarIDs.insert(calendar.id) }
+                } label: { Image(systemName: "slider.horizontal.3").frame(width: 26, height: 26) }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+                .accessibilityLabel("\(calendar.displayName) details")
+                .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+            }.padding(15)
+            if let warning = calendar.eventAccessWarning {
+                Label(warning, systemImage: "exclamationmark.triangle")
+                    .font(.system(size: 11)).foregroundStyle(ShieldTheme.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 15).padding(.bottom, 12)
             }
-            TextField(calendar.isPrimary ? "Calendar alias or account nickname" : "Calendar alias", text: calendarAliasBinding(calendar.id))
-                .glassTextField()
-                .disabled(!store.snapshot.isAccountEnabled(calendar.accountID))
-            HStack(spacing: 8) {
-                Text("Browser")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(LiquidGlassTheme.tertiaryText)
-                Picker("Browser override", selection: calendarBrowserBinding(calendar.id)) {
-                    Text("Use default").tag(BrowserKind?.none)
-                    ForEach(BrowserKind.allCases) { browser in
-                        Text(browser.displayName).tag(BrowserKind?.some(browser))
+            if expanded {
+                VStack(alignment: .leading, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Display name").font(.system(size: 11)).foregroundStyle(.secondary)
+                        TextField(calendar.isPrimary ? "Calendar alias or account name" : "Calendar alias", text: calendarAliasBinding(calendar.id)).shieldTextField()
+                    }
+                    HStack {
+                        Text("Open meetings with").font(.system(size: 12))
+                        Spacer()
+                        Picker("Browser override", selection: calendarBrowserBinding(calendar.id)) {
+                            Text("Use default browser").tag(BrowserKind?.none)
+                            ForEach(BrowserKind.allCases) { browser in Text(browser.displayName).tag(BrowserKind?.some(browser)) }
+                        }.labelsHidden().frame(width: 165)
+                    }
+                    if let browser = store.snapshot.calendarSettings(for: calendar.id).browserSelection?.browser, browser.supportsProfileSelection {
+                        HStack { Text("Profile").font(.system(size: 12)); Spacer(); profilePicker(browser: browser, selection: calendarProfileBinding(calendar.id)) }
                     }
                 }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .controlSize(.small)
-                .frame(width: 124)
-                if let overrideBrowser = store.snapshot.calendarSettings(for: calendar.id).browserSelection?.browser,
-                   overrideBrowser.supportsProfileSelection {
-                    profilePicker(browser: overrideBrowser, selection: calendarProfileBinding(calendar.id))
-                }
-                Spacer(minLength: 0)
+                .padding(15).background(ShieldTheme.window).disabled(!isEnabled)
             }
-            .disabled(!store.snapshot.isAccountEnabled(calendar.accountID))
         }
-        .opacity(store.snapshot.isAccountEnabled(calendar.accountID) ? 1 : 0.55)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+    }
+
+    func calendarModeBinding(_ calendar: UserCalendar) -> Binding<CalendarDisplayMode> {
+        Binding { store.snapshot.displayMode(for: calendar) } set: { mode in
+            updateSettings { $0.setDisplayMode(mode, for: calendar, availableCalendars: controller.calendars) }
+        }
     }
     func accountEnabledBinding(_ accountID: String) -> Binding<Bool> {
         Binding {
@@ -196,32 +164,6 @@ extension SettingsView {
                 } else {
                     settings.disabledGoogleAccountIDs.insert(accountID)
                 }
-            }
-        }
-    }
-
-    func calendarSelectedBinding(_ calendarID: String) -> Binding<Bool> {
-        Binding {
-            if let calendar = controller.calendars.first(where: { $0.id == calendarID }) {
-                store.snapshot.isCalendarSelected(calendar)
-            } else {
-                store.snapshot.isCalendarSelected(calendarID)
-            }
-        } set: { isSelected in
-            updateSettings { settings in
-                settings.setCalendarSelected(isSelected, calendarID: calendarID, availableCalendars: controller.calendars)
-            }
-        }
-    }
-
-    func calendarAlertsBinding(_ calendarID: String) -> Binding<Bool> {
-        Binding {
-            store.snapshot.calendarSettings(for: calendarID).isAlertEnabled
-        } set: { isEnabled in
-            updateSettings { settings in
-                var calendarSettings = settings.calendarSettings(for: calendarID)
-                calendarSettings.isAlertEnabled = isEnabled
-                settings.calendarSettings[calendarID] = calendarSettings
             }
         }
     }
@@ -287,4 +229,5 @@ extension SettingsView {
                 settings.calendarSettings[calendarID] = calendarSettings
             }
         }
-    }}
+    }
+}

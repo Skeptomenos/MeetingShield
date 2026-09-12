@@ -15,7 +15,7 @@ This is inspired by "In Your Face", but should evolve as its own app with native
 - Detect meeting URLs for Google Meet, Zoom, Microsoft Teams, Webex, and common conferencing links.
 - Show a menu bar countdown to the next meeting.
 - Trigger a full-screen alert a configurable number of minutes before the meeting.
-- Provide one-click join, snooze, and dismiss actions.
+- Provide one-click join and snooze, with deliberate hold or confirmed dismissal.
 - Store preferences locally.
 - Launch at login.
 
@@ -48,6 +48,10 @@ Build a small native prototype that:
 After that works, wire in Google Calendar OAuth and real event polling.
 
 ## Current MVP
+
+The September 8 native redesign puts Settings in four panes: **Calendars**, **Alerts**, **Menu bar**, and **General**. Account management lives beside each account’s calendars. Each calendar has one mode: Alerts & agenda, Agenda only, or Off. Aliases and browser overrides open on demand; changing a mode preserves those settings.
+
+The menu uses a compact agenda with expandable protection details and month calendar. Full-screen alerts use a subtle frosted backdrop, with a solid surface when macOS Reduce Transparency is enabled. Optional warning rows and collapsed snooze choices keep their space so selection and expansion leave the shared controls aligned. **Alerts → Preview alert** opens a sample that cannot launch a meeting or change reminder state. See the [redesign validation](_planning/2026-09-08-native-redesign-validation.md).
 
 Historical readiness check, 2026-09-07: all 18 core reliability steps and 46 installed-app acceptance cases passed independent verification on September 4. The later legacy-token catalog correction passes the complete 507-test gate and CI. Its fresh signed installation, relaunch refreshes, and visible Protection read-back pass; [focused installed evidence](_planning/2026-09-07-installed-healthcheck.md) records the exact artifact, preservation checks, and limits.
 

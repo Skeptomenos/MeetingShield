@@ -21,6 +21,10 @@ final class RuntimePresentationCheck {
         case presentationOn = "presentation-on"
         case presentationOff = "presentation-off"
         case timeoutBeforeRetry = "timeout-before-retry"
+        case settings, light, dark
+        case authorizationExpired = "authorization-expired"
+        case authorizationRecovered = "authorization-recovered"
+        case longAgenda = "long-agenda"
     }
 
     private struct WindowSnapshot: Encodable {
@@ -57,6 +61,7 @@ final class RuntimePresentationCheck {
         var storedAcknowledgements: [String: OccurrenceReminderState.Acknowledgement]
         var statePersistencePending: Bool
         var controllerGeneration: Int
+        var settings: AppSettingsSnapshot
     }
 
     private var controller: MeetingShieldController?
@@ -66,6 +71,7 @@ final class RuntimePresentationCheck {
     private var fixtureKeys: Set<OccurrenceKey> = []
     private var menuWindow: NSWindow?
     private var controllerGeneration = 0
+    private var settingsWindow: SettingsWindowController?
 
     func run() async {
         guard !NSScreen.screens.isEmpty else {
@@ -133,6 +139,9 @@ final class RuntimePresentationCheck {
             }
             if command == .unchanged {
                 await controller.refresh(reason: "runtime-check")
+            } else if command == .authorizationExpired || command == .authorizationRecovered {
+                await provider.setAuthorizationExpired(command == .authorizationExpired)
+                await controller.refresh(reason: "runtime-check")
             } else if command == .failLaunch || command == .allowLaunch {
                 recording.shouldFail = command == .failLaunch
             } else if command == .alertAgainSecond {
@@ -146,6 +155,31 @@ final class RuntimePresentationCheck {
                 await controller.refresh(reason: "runtime-check")
             } else if command == .menu {
                 showMenu(controller: controller)
+            } else if command == .longAgenda {
+                controller.isPresentationMode = true
+                FullScreenAlertWindowController.shared.hide()
+                settings.update {
+                    $0.visibilityWindow.kind = .nextDays
+                    $0.visibilityWindow.days = 2
+                }
+                fixtureSnapshot = (1...20).map { index in
+                    .sample(
+                        eventID: "presentation-agenda-\(index)",
+                        title: String(format: "Agenda meeting %02d", index),
+                        startDate: anchor.addingTimeInterval(TimeInterval(index * 300))
+                    )
+                }
+                fixtureKeys.formUnion(fixtureSnapshot.map(\.occurrenceKey))
+                await provider.replace(fixtureSnapshot)
+                await controller.refresh(reason: "runtime-check")
+                showMenu(controller: controller, height: 560)
+            } else if command == .settings {
+                controller.isPresentationMode = true
+                FullScreenAlertWindowController.shared.hide()
+                settingsWindow = SettingsWindowController(store: settings, controller: controller)
+                settingsWindow?.show()
+            } else if command == .light || command == .dark {
+                NSApp.appearance = NSAppearance(named: command == .light ? .aqua : .darkAqua)
             } else if command == .presentationOn || command == .presentationOff {
                 controller.isPresentationMode = command == .presentationOn
             } else if command == .timeoutBeforeRetry {
@@ -217,7 +251,8 @@ final class RuntimePresentationCheck {
                     changed.startDate = Date().addingTimeInterval(12)
                 case .unchanged, .remove, .observe, .finish, .arrival, .menu,
                      .failLaunch, .allowLaunch, .alertAgainSecond, .restartState,
-                     .copies, .newCopy, .removeFirstCopy, .presentationOn, .presentationOff, .timeoutBeforeRetry, .retry:
+                     .copies, .newCopy, .removeFirstCopy, .presentationOn, .presentationOff, .timeoutBeforeRetry, .retry,
+                     .settings, .light, .dark, .longAgenda, .authorizationExpired, .authorizationRecovered:
                     break
                 }
                 var snapshot = command == .remove ? [first] : [first, changed]
@@ -300,7 +335,8 @@ final class RuntimePresentationCheck {
             canAlertAgainIDs: controller.events.filter { controller.canAlertAgain($0, now: now) }.map(\.id).sorted(),
             storedAcknowledgements: acknowledgements,
             statePersistencePending: stateStore.isPersistencePending,
-            controllerGeneration: controllerGeneration
+            controllerGeneration: controllerGeneration,
+            settings: controller.settingsStore.snapshot
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -311,6 +347,8 @@ final class RuntimePresentationCheck {
 
     private func cleanup() {
         closeMenu()
+        settingsWindow?.close()
+        settingsWindow = nil
         controller?.clearFallback()
         FullScreenAlertWindowController.shared.hide()
         controller = nil
@@ -326,7 +364,10 @@ final class RuntimePresentationCheck {
         self.stateStore = stateStore
         controllerGeneration += 1
         return MeetingShieldController(
-            settingsStore: settings, provider: provider, reminderStateStore: stateStore,
+            settingsStore: settings, provider: provider,
+            credentialsResolver: GoogleOAuthCredentialsResolver(bundleInfoValue: { _ in nil }, environment: [:]),
+            makeGoogleProvider: { _ in provider },
+            reminderStateStore: stateStore,
             cacheStore: EventCacheStore(fileURL: root.appending(path: "presentation-cache.json")),
             notificationService: NoopNotificationService(),
             launcher: MeetingLauncher(profileService: BrowserProfileService(homeDirectory: root), browserLauncher: recording),
@@ -334,9 +375,9 @@ final class RuntimePresentationCheck {
         )
     }
 
-    private func showMenu(controller: MeetingShieldController) {
+    private func showMenu(controller: MeetingShieldController, height: CGFloat? = nil) {
         closeMenu()
-        let height = MenuContentView.preferredHeight(eventCount: controller.menuEvents.count)
+        let height = height ?? MenuContentView.preferredHeight(eventCount: controller.menuEvents.count)
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: MenuContentView.preferredWidth, height: height),
             styleMask: [.titled, .closable], backing: .buffered, defer: false
@@ -396,12 +437,17 @@ private final class PresentationSoundRecorder: AlertSoundPlaying, @unchecked Sen
 private actor PresentationCalendarProvider: CalendarProvider {
     let providerID = "mock"
     private var snapshot: [CalendarEventOccurrence]
+    private var authorizationExpired = false
 
     init(events: [CalendarEventOccurrence]) { snapshot = events }
-    var authState: CalendarProviderAuthState { get async { .connected(accountEmail: "mock@example.com") } }
+    var authState: CalendarProviderAuthState {
+        get async { authorizationExpired ? .expired(reason: "Synthetic authorization expired") : .connected(accountEmail: "mock@example.com") }
+    }
+    func setAuthorizationExpired(_ expired: Bool) { authorizationExpired = expired }
     func accounts() async -> [ConnectedCalendarAccount] { [ConnectedCalendarAccount(id: "mock-account", displayName: "Synthetic account")] }
     func calendars() async throws -> [UserCalendar] {
-        ["primary", "secondary"].map { UserCalendar(id: $0, accountID: "mock-account", displayName: $0, isPrimary: $0 == "primary", isSelected: true) }
+        if authorizationExpired { throw CalendarProviderError.authExpired("Synthetic authorization expired") }
+        return ["primary", "secondary"].map { UserCalendar(id: $0, accountID: "mock-account", displayName: $0, isPrimary: $0 == "primary", isSelected: true) }
     }
     func events(in window: CalendarFetchWindow) async throws -> [CalendarEventOccurrence] { snapshot }
     func refresh(in window: CalendarFetchWindow) async throws -> [CalendarEventOccurrence] { snapshot }

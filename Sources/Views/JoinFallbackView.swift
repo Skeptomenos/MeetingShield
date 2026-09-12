@@ -91,15 +91,15 @@ struct JoinFallbackView: View {
         HStack(spacing: 12) {
             Image(systemName: fallback.warning == nil && fallback.errorMessage == nil ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(fallback.warning == nil && fallback.errorMessage == nil ? Color(nsColor: .systemGreen) : LiquidGlassTheme.warning)
+                .foregroundStyle(fallback.warning == nil && fallback.errorMessage == nil ? Color(nsColor: .systemGreen) : ShieldTheme.warning)
             VStack(alignment: .leading, spacing: 2) {
                 Text(fallback.errorMessage == nil ? "Opened in \(fallback.openedIn)" : "Meeting did not open")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(LiquidGlassTheme.primaryText)
+                    .foregroundStyle(ShieldTheme.primaryText)
                 if let warning = fallback.errorMessage ?? fallback.warning {
                     Text(warning)
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(LiquidGlassTheme.secondaryText)
+                        .foregroundStyle(ShieldTheme.secondaryText)
                 }
             }
             Spacer(minLength: 12)
@@ -108,7 +108,7 @@ struct JoinFallbackView: View {
             } label: {
                 Label("Open Again", systemImage: "arrow.up.forward.app")
             }
-            .buttonStyle(SmallGlassButtonStyle(role: .neutral, minWidth: 98))
+            .buttonStyle(ShieldButtonStyle(role: .neutral, minWidth: 98))
             .accessibilityLabel("Open again")
             .accessibilityHint("Opens the meeting link again")
             Button {
@@ -116,7 +116,7 @@ struct JoinFallbackView: View {
             } label: {
                 Label("Dismiss", systemImage: "checkmark")
             }
-            .buttonStyle(SmallGlassButtonStyle(role: .primary, minWidth: 82))
+            .buttonStyle(ShieldButtonStyle(role: .primary, minWidth: 82))
             .accessibilityLabel("Dismiss this event")
             .accessibilityHint("Opens confirmation before dismissing this event occurrence")
             Button {
@@ -126,14 +126,14 @@ struct JoinFallbackView: View {
             }
             .buttonStyle(.plain)
             .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(LiquidGlassTheme.secondaryText)
+            .foregroundStyle(ShieldTheme.secondaryText)
             .frame(width: 24, height: 24)
             .accessibilityLabel("Close fallback alert")
         }
         .padding(.horizontal, 13)
         .padding(.vertical, 11)
         .frame(minWidth: 520)
-        .glassPanel(cornerRadius: 10)
+        .shieldPanel(cornerRadius: 10)
         .shadow(color: .black.opacity(0.42), radius: 28, x: 0, y: 16)
     }
 }

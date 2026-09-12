@@ -1,143 +1,107 @@
 import AppKit
 import SwiftUI
 
-struct MenuContentView: View {
-    static let preferredWidth: CGFloat = 292
-    static let fixedHeightExcludingAgendaRows: CGFloat = 506
-    static let agendaRowHeight: CGFloat = 26
-    static let persistenceWarningHeight: CGFloat = 26
-    static let notificationWarningHeight: CGFloat = 36
+@MainActor
+final class MenuPresentationState: ObservableObject {
+    @Published var showsMonth = false
+    @Published var showsHealth = false
+}
 
+struct MenuContentView: View {
+    static let preferredWidth: CGFloat = 348
     @ObservedObject var controller: MeetingShieldController
     var popoverHeight: CGFloat
     var closeMenu: @MainActor () -> Void = { MenuBarController.shared.closePopover() }
+    @ObservedObject var presentation = MenuPresentationState()
+    var onExpansionChange: () -> Void = {}
     @State private var selectedMonth = Date()
 
-    static func preferredHeight(
-        eventCount: Int, hasPersistenceWarning: Bool = false, hasNotificationWarning: Bool = false
-    ) -> CGFloat {
-        fixedHeightExcludingAgendaRows + CGFloat(eventCount) * agendaRowHeight
-            + (hasPersistenceWarning ? persistenceWarningHeight : 0)
-            + (hasNotificationWarning ? notificationWarningHeight : 0)
+    static func preferredHeight(eventCount: Int, hasPersistenceWarning: Bool = false, hasNotificationWarning: Bool = false,
+                                showsMonth: Bool = false, showsHealth: Bool = false) -> CGFloat {
+        232 + CGFloat(min(eventCount, 5)) * 46
+            + (hasPersistenceWarning ? 35 : 0) + (hasNotificationWarning ? 55 : 0)
+            + (showsMonth ? 245 : 0) + (showsHealth ? 92 : 0)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            statusSection
-                .padding(.horizontal, 12)
-                .padding(.top, 9)
-                .padding(.bottom, 8)
-
-            MenuDivider()
-
-            nextSection
-                .padding(.horizontal, 12)
-                .padding(.vertical, 11)
-
-            MenuDivider()
-
-            agendaSection
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-
-            MenuDivider()
-
-            MiniMonthCalendarView(selectedDate: $selectedMonth)
-                .padding(.horizontal, 12)
-                .padding(.top, 11)
-                .padding(.bottom, 21)
-
+        VStack(spacing: 0) {
+            HStack {
+                Text(Date.now.formatted(.dateTime.weekday(.wide).day().month(.abbreviated)))
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                Spacer()
+                Button { presentation.showsHealth.toggle() } label: {
+                    Label(controller.protectionHealthSummary.level == .healthy ? "Protected" : "Needs attention",
+                          systemImage: healthSystemImage(controller.protectionHealthSummary.level))
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.plain).foregroundStyle(healthColor(controller.protectionHealthSummary.level))
+                .accessibilityLabel("Protection details")
+                .accessibilityValue(controller.protectionHealthSummary.title)
+            }.padding(.horizontal, 18).padding(.vertical, 14)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    if presentation.showsHealth || controller.protectionHealthSummary.level != .healthy { healthDetails }
+                    warnings
+                    nextSection
+                    if !controller.menuEvents.isEmpty { agendaSection }
+                }.padding(.horizontal, 18).padding(.bottom, 16)
+            }
+            VStack(alignment: .leading, spacing: 18) {
+                Divider()
+                DisclosureGroup(isExpanded: $presentation.showsMonth) {
+                    MiniMonthCalendarView(selectedDate: $selectedMonth).padding(.top, 12)
+                } label: {
+                    Text("Month calendar").font(.system(size: 12)).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 18).padding(.bottom, 16)
+            .fixedSize(horizontal: false, vertical: true)
             bottomBar
         }
-        .frame(width: Self.preferredWidth, alignment: .topLeading)
-        .frame(maxHeight: .infinity, alignment: .topLeading)
-        .background(.regularMaterial)
-        .background(LiquidGlassTheme.popoverFill)
+        .frame(width: Self.preferredWidth, height: popoverHeight, alignment: .topLeading)
+        .background(ShieldTheme.popoverFill)
+        .onChange(of: presentation.showsMonth) { _, _ in onExpansionChange() }
+        .onChange(of: presentation.showsHealth) { _, _ in onExpansionChange() }
     }
 
-    private var statusSection: some View {
+    private var healthDetails: some View {
         let summary = controller.protectionHealthSummary
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Label(summary.title, systemImage: healthSystemImage(summary.level))
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(healthColor(summary.level))
-                Spacer(minLength: 4)
-                Button {
-                    controller.copyProtectionSummary()
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(LiquidGlassTheme.secondaryText)
-                .help("Copy protection summary")
-                .accessibilityLabel("Copy protection summary")
+        return VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text(summary.title).font(.system(size: 12, weight: .medium))
+                Spacer()
+                Button { controller.copyProtectionSummary() } label: { Image(systemName: "doc.on.doc") }
+                    .buttonStyle(.plain).accessibilityLabel("Copy protection summary").help("Copy protection summary")
             }
-            Text(summary.coverageText)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(LiquidGlassTheme.secondaryText)
-                .lineLimit(1)
-            Text(summary.scheduleText)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(LiquidGlassTheme.secondaryText)
-                .lineLimit(1)
+            Text(summary.coverageText).font(.system(size: 11)).foregroundStyle(.secondary)
+            Text(summary.scheduleText).font(.system(size: 11)).foregroundStyle(.secondary)
             if !summary.actions.isEmpty {
-                HStack(spacing: 10) {
+                HStack(spacing: 14) {
                     ForEach(summary.actions, id: \.rawValue) { action in
-                        Button(action.rawValue) {
-                            controller.performProtectionHealthAction(action)
-                        }
-                        .font(.system(size: 10, weight: .semibold))
-                        .buttonStyle(.plain)
-                        .foregroundStyle(LiquidGlassTheme.accent)
+                        Button(action.rawValue) { controller.performProtectionHealthAction(action) }
+                            .buttonStyle(.plain).foregroundStyle(ShieldTheme.accent).font(.system(size: 12))
                     }
                 }
             }
-            if !controller.persistenceWarnings.isEmpty {
-                Button("Storage needs attention", systemImage: "exclamationmark.triangle") {
-                    controller.openSettings()
-                }
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(LiquidGlassTheme.warning)
-                .buttonStyle(.plain)
-                .help("Review unsaved data and retry storage in Settings")
+        }.fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder private var warnings: some View {
+        if !controller.persistenceWarnings.isEmpty {
+            Button("Storage needs attention", systemImage: "exclamationmark.triangle") { controller.openSettings() }
+                .font(.system(size: 12)).foregroundStyle(ShieldTheme.warning).buttonStyle(.plain)
                 .accessibilityIdentifier("persistence-warning-settings")
-            }
-            if let warning = controller.notificationWarning {
-                Label(warning, systemImage: "bell.slash.circle")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(LiquidGlassTheme.warning)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let status = controller.statusMessage {
-                Label(status, systemImage: "exclamationmark.triangle")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(LiquidGlassTheme.warning)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if case .disconnected = controller.authState {
-                Label("Connect Google Calendar", systemImage: "calendar.badge.plus")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(LiquidGlassTheme.warning)
-            } else if case .needsConfiguration = controller.authState {
-                Label("Google Calendar needs setup", systemImage: "gearshape")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(LiquidGlassTheme.warning)
-            } else if case .authenticating = controller.authState {
-                Label("Connecting Google Calendar", systemImage: "arrow.clockwise")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(LiquidGlassTheme.secondaryText)
-            } else if case .expired = controller.authState {
-                Label("Reconnect Google Calendar", systemImage: "exclamationmark.triangle")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(LiquidGlassTheme.warning)
-            } else if controller.isPresentationMode {
-                Label("Presentation mode", systemImage: "bell.slash")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(LiquidGlassTheme.secondaryText)
-            }
         }
+        if let warning = controller.notificationWarning { warningLabel(warning, systemImage: "bell.slash.circle") }
+        if let status = controller.statusMessage { warningLabel(status, systemImage: "exclamationmark.triangle") }
+        if case .authenticating = controller.authState {
+            Label("Connecting Google Calendar…", systemImage: "arrow.clockwise").font(.system(size: 12)).foregroundStyle(.secondary)
+        }
+    }
+
+    private func warningLabel(_ title: String, systemImage: String) -> some View {
+        Label(title, systemImage: systemImage).font(.system(size: 12)).foregroundStyle(ShieldTheme.warning)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private func healthSystemImage(_ level: ProtectionHealthSummary.Level) -> String {
@@ -147,146 +111,63 @@ struct MenuContentView: View {
         case .unavailable: "xmark.shield"
         }
     }
-
     private func healthColor(_ level: ProtectionHealthSummary.Level) -> Color {
-        level == .healthy ? LiquidGlassTheme.secondaryText : LiquidGlassTheme.warning
+        level == .healthy ? .secondary : ShieldTheme.warning
     }
 
-    private var reconnectTitle: String {
-        switch controller.authState {
-        case .disconnected, .needsConfiguration:
-            "Connect Google Calendar"
-        case .authenticating:
-            "Connecting Google Calendar"
-        case .connected, .expired:
-            "Reconnect Google Calendar"
-        }
-    }
-
-    @ViewBuilder
     private var nextSection: some View {
-        if let event = controller.nextEvent {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("NEXT")
-                    .font(.system(size: 11, weight: .bold))
-                    .tracking(0.6)
-                    .foregroundStyle(LiquidGlassTheme.secondaryText)
-                Text(event.title)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(LiquidGlassTheme.primaryText)
-                    .lineLimit(1)
-                Text("\(DateFormatter.shortTimeString(from: event.startDate)) · \(controller.displayCalendarName(for: event))")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(LiquidGlassTheme.secondaryText)
+        VStack(alignment: .leading, spacing: 8) {
+            if let event = controller.nextEvent {
+                Text(RelativeDateTimeFormatter.shortString(for: event.startDate, relativeTo: .now))
+                    .font(.system(size: 12, weight: .medium)).foregroundStyle(ShieldTheme.accent)
+                Text(event.title).font(.system(size: 22, weight: .medium)).lineLimit(3)
+                Text("\(DateFormatter.shortTimeString(from: event.startDate))–\(DateFormatter.shortTimeString(from: event.endDate)) · \(controller.displayCalendarName(for: event))")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+            } else {
+                Text("No upcoming meetings").font(.system(size: 20, weight: .medium))
+                Text("In your selected window").font(.system(size: 12)).foregroundStyle(.secondary)
             }
-        } else {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("NEXT")
-                    .font(.system(size: 11, weight: .bold))
-                    .tracking(0.6)
-                    .foregroundStyle(LiquidGlassTheme.secondaryText)
-                Text("No meetings in view")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(LiquidGlassTheme.secondaryText)
-            }
-        }
+        }.frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var agendaSection: some View {
-        let menuEvents = controller.menuEvents
-        return VStack(alignment: .leading, spacing: 8) {
-            Text("AGENDA")
-                .font(.system(size: 11, weight: .bold))
-                .tracking(0.6)
-                .foregroundStyle(LiquidGlassTheme.secondaryText)
-            if !menuEvents.isEmpty {
-                ScrollView(.vertical) {
-                    LazyVStack(alignment: .leading, spacing: 7) {
-                        ForEach(menuEvents) { event in
-                            HStack(spacing: 8) {
-                                Text(DateFormatter.shortTimeString(from: event.startDate))
-                                    .font(.system(size: 12, weight: .medium).monospacedDigit())
-                                    .monospacedDigit()
-                                    .foregroundStyle(LiquidGlassTheme.secondaryText)
-                                    .frame(width: 48, alignment: .leading)
-                                Text(event.title)
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(LiquidGlassTheme.primaryText)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                                    .layoutPriority(1)
-                                Spacer(minLength: 0)
-                                if controller.canAlertAgain(event) {
-                                    Button("Alert Again") {
-                                        closeMenu()
-                                        controller.alertAgain(event)
-                                    }
-                                    .font(.caption)
-                                    .accessibilityLabel("Alert again for \(event.title)")
-                                    .help("Restore this meeting's alert")
-                                } else {
-                                    Text(controller.displayCalendarName(for: event))
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundStyle(LiquidGlassTheme.secondaryText)
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
-                                        .frame(width: 86, alignment: .trailing)
-                                }
-                            }
-                            .frame(height: Self.agendaRowHeight - 8)
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Agenda").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+            ForEach(controller.menuEvents) { event in
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(event.isAllDay ? "All day" : DateFormatter.shortTimeString(from: event.startDate))
+                            .font(.system(size: 12)).monospacedDigit()
+                        if !Calendar.current.isDateInToday(event.startDate) {
+                            Text(event.startDate.formatted(.dateTime.day().month(.abbreviated))).font(.system(size: 10))
                         }
+                    }.foregroundStyle(.secondary).frame(width: 49, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(event.title).font(.system(size: 13, weight: .medium)).lineLimit(2)
+                        Text(controller.displayCalendarName(for: event)).font(.system(size: 11)).foregroundStyle(.secondary)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    if controller.canAlertAgain(event) {
+                        Button("Alert again") { closeMenu(); controller.alertAgain(event) }
+                            .font(.system(size: 11)).buttonStyle(.plain).foregroundStyle(ShieldTheme.accent)
+                            .accessibilityLabel("Alert again for \(event.title)")
                     }
                 }
-                .frame(height: agendaListHeight(eventCount: menuEvents.count))
             }
         }
-    }
-
-    private func agendaListHeight(eventCount: Int) -> CGFloat {
-        let desiredHeight = CGFloat(eventCount) * Self.agendaRowHeight
-        let warningHeight = (controller.persistenceWarnings.isEmpty ? 0 : Self.persistenceWarningHeight)
-            + (controller.notificationWarning == nil ? 0 : Self.notificationWarningHeight)
-        let availableHeight = max(Self.agendaRowHeight, popoverHeight - Self.fixedHeightExcludingAgendaRows - warningHeight)
-        return min(desiredHeight, availableHeight)
     }
 
     private var bottomBar: some View {
-        HStack(spacing: 16) {
-            MenuIconButton(systemImage: "plus", help: "New Event") {
-                controller.openNewGoogleEvent()
-            }
-            if shouldShowReconnectAction {
-                MenuIconButton(systemImage: "arrow.clockwise", help: reconnectTitle) {
-                    controller.reconnectGoogle()
-                }
-            }
-            MenuIconButton(systemImage: controller.isPresentationMode ? "bell.slash.fill" : "bell.slash", help: "Presentation Mode") {
-                controller.isPresentationMode.toggle()
-            }
+        HStack(spacing: 14) {
+            Toggle("Presentation mode", isOn: $controller.isPresentationMode)
+                .toggleStyle(.checkbox).font(.system(size: 11))
             Spacer()
-            MenuIconButton(systemImage: "gearshape", help: "Settings") {
-                controller.openSettings()
-            }
-            .keyboardShortcut(",", modifiers: .command)
+            MenuIconButton(systemImage: "plus", help: "New Event") { controller.openNewGoogleEvent() }
+            MenuIconButton(systemImage: "gearshape", help: "Settings") { controller.openSettings() }
+                .keyboardShortcut(",", modifiers: .command)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(.thinMaterial)
-        .background(Color.white.opacity(0.045))
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(LiquidGlassTheme.separator)
-                .frame(height: 1)
-        }
-    }
-
-    private var shouldShowReconnectAction: Bool {
-        switch controller.authState {
-        case .connected, .authenticating:
-            controller.statusMessage != nil
-        case .disconnected, .needsConfiguration, .expired:
-            true
-        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .background(ShieldTheme.sidebar)
+        .overlay(alignment: .top) { Divider() }
     }
 }
 
@@ -294,26 +175,9 @@ private struct MenuIconButton: View {
     var systemImage: String
     var help: String
     var action: () -> Void
-
     var body: some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 13, weight: .semibold))
-                .frame(width: 22, height: 22)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(LiquidGlassTheme.secondaryText)
-        .help(help)
-        .accessibilityLabel(help)
-    }
-}
-
-private struct MenuDivider: View {
-    var body: some View {
-        Rectangle()
-            .fill(LiquidGlassTheme.separator)
-            .frame(height: 1)
+        Button(action: action) { Image(systemName: systemImage).frame(width: 22, height: 22) }
+            .buttonStyle(.plain).foregroundStyle(.secondary).help(help).accessibilityLabel(help)
     }
 }
 
@@ -328,7 +192,7 @@ struct MiniMonthCalendarView: View {
             HStack(spacing: 6) {
                 Text(monthTitle)
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(LiquidGlassTheme.secondaryText)
+                    .foregroundStyle(ShieldTheme.secondaryText)
                 Spacer()
                 MonthNavigationButton(systemImage: "chevron.left", help: "Previous month") {
                     moveMonth(by: -1)
@@ -337,20 +201,20 @@ struct MiniMonthCalendarView: View {
                     moveMonth(by: 1)
                 }
             }
-            LazyVGrid(columns: Array(repeating: GridItem(.fixed(34), spacing: 0), count: 7), spacing: 8) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 7), spacing: 8) {
                 ForEach(Array(weekdays.enumerated()), id: \.offset) { _, weekday in
                     Text(weekday)
                         .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(LiquidGlassTheme.secondaryText)
+                        .foregroundStyle(ShieldTheme.secondaryText)
                         .frame(width: 28, height: 18)
                 }
                 ForEach(days.indices, id: \.self) { index in
                     if let date = days[index] {
                         Text("\(calendar.component(.day, from: date))")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(calendar.isDateInToday(date) ? Color.white : LiquidGlassTheme.primaryText)
+                            .foregroundStyle(calendar.isDateInToday(date) ? Color.white : ShieldTheme.primaryText)
                             .frame(width: 28, height: 22)
-                            .background(calendar.isDateInToday(date) ? LiquidGlassTheme.accent.opacity(0.92) : Color.clear)
+                            .background(calendar.isDateInToday(date) ? ShieldTheme.accent.opacity(0.92) : Color.clear)
                             .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
                     } else {
                         Color.clear.frame(width: 28, height: 22)
@@ -401,7 +265,7 @@ private struct MonthNavigationButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(LiquidGlassTheme.secondaryText)
+        .foregroundStyle(ShieldTheme.secondaryText)
         .help(help)
         .accessibilityLabel(help)
     }

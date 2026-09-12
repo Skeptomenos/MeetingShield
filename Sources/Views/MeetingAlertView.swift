@@ -9,333 +9,212 @@ struct MeetingAlertView: View {
     var onRequestDismissal: (ScheduledReminder) -> Void
     var onMute: (ScheduledReminder) -> Void
     var onSnoozeAll: () -> Void
-
+    @State private var expandedSnooze = false
     private var reminders: [ScheduledReminder] { keyTarget.reminders }
 
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.58)
-                .ignoresSafeArea()
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .opacity(0.48)
-                .ignoresSafeArea()
-
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                VStack(spacing: 16) {
-                    if reminders.count > 1 {
-                        overlapSelector(now: context.date)
+        GeometryReader { geometry in
+            ScrollView {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    VStack(spacing: 26) {
+                        Label("Meeting Shield", systemImage: "shield")
+                            .font(.system(size: 12)).foregroundStyle(.secondary)
+                        if reminders.count > 1 { overlapSelector }
+                        if let reminder = keyTarget.selectedReminder {
+                            alertContent(reminder, now: context.date)
+                        }
                     }
-
-                    if let selectedReminder = keyTarget.selectedReminder {
-                        alertCard(for: selectedReminder, now: context.date)
-                            .frame(maxWidth: 780)
-                    }
+                    .padding(.vertical, 40).padding(.horizontal, 28)
+                    .frame(maxWidth: 760)
+                    .frame(maxWidth: .infinity, minHeight: geometry.size.height)
                 }
-                .padding(44)
             }
         }
+        .background(AlertBackdrop())
+        .onChange(of: keyTarget.selectedID) { _, _ in expandedSnooze = false }
         .onExitCommand {}
     }
 
-    private func overlapSelector(now: Date) -> some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 6) {
-                ForEach(reminders) { reminder in
-                    Button {
-                        keyTarget.selectedID = reminder.id
-                    } label: {
-                        HStack(spacing: 7) {
-                            Image(systemName: keyTarget.selectedID == reminder.id ? "circle.fill" : "circle")
-                                .font(.system(size: 8, weight: .bold))
-                            Text(reminder.event.title)
-                                .font(.system(size: 13, weight: .semibold))
-                                .lineLimit(1)
-                        }
-                        .padding(.horizontal, 11)
-                        .frame(height: 30)
-                    }
-                    .buttonStyle(OverlapChipButtonStyle(isSelected: keyTarget.selectedID == reminder.id))
-                    .accessibilityLabel("Show alert for \(reminder.event.title)")
-                    .accessibilityValue("Show alert for \(reminder.event.title)")
-                    .accessibilityHint(keyTarget.selectedID == reminder.id ? "Currently selected meeting" : "Switches the alert to this meeting")
+    private var overlapSelector: some View {
+        VStack(spacing: 10) {
+            Text("\(reminders.count) meetings need attention").font(.system(size: 12)).foregroundStyle(.secondary)
+            if reminders.count <= 3 {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 20) { meetingOptions }
+                    VStack(spacing: 4) { meetingOptions }
                 }
+            } else {
+                Picker("Meeting needing attention", selection: $keyTarget.selectedID) {
+                    ForEach(reminders) { reminder in
+                        Text("\(reminder.event.title) · \(DateFormatter.shortTimeString(from: reminder.event.startDate))")
+                            .tag(Optional(reminder.id))
+                    }
+                }.frame(maxWidth: 450)
             }
-            .padding(5)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(.white.opacity(0.11), lineWidth: 1)
-            }
-
-            Button {
-                onSnoozeAll()
-            } label: {
-                Label("Snooze All", systemImage: "clock.arrow.circlepath")
-                    .font(.system(size: 13, weight: .semibold))
-                    .frame(height: 30)
-            }
-            .buttonStyle(LiquidAlertButtonStyle(kind: .secondary, minWidth: 118))
-            .disabled(reminders.allSatisfy { availableSnoozeChoices($0, now).isEmpty })
-            .accessibilityLabel("Snooze all visible meetings")
-            .accessibilityValue("Snooze all visible meetings")
-            .accessibilityHint("Snoozes meetings that can still return safely; imminent meetings stay visible")
         }
     }
 
-    private func alertCard(for reminder: ScheduledReminder, now: Date) -> some View {
-        VStack(spacing: 0) {
-            VStack(spacing: 16) {
-                HStack(spacing: 8) {
-                    Image(systemName: reminder.detectedLinks.isEmpty ? "calendar.badge.exclamationmark" : "shield.lefthalf.filled")
-                        .font(.system(size: 13, weight: .semibold))
-                    Text(reminder.detectedLinks.isEmpty ? "No Meeting Link Found" : "Meeting Shield")
-                        .font(.system(size: 12, weight: .bold))
-                        .textCase(.uppercase)
-                        .tracking(0.8)
-                    Spacer()
-                    Text(linkStatus(for: reminder))
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(reminder.detectedLinks.isEmpty ? .orange : .secondary)
-                }
-                .foregroundStyle(reminder.detectedLinks.isEmpty ? .orange : .secondary)
-
-                Text(reminder.event.title)
-                    .font(.system(size: 52, weight: .bold, design: .rounded))
-                    .multilineTextAlignment(.center)
-                    .minimumScaleFactor(0.45)
-                    .lineLimit(3)
-                    .foregroundStyle(.white.opacity(0.96))
-                    .frame(maxWidth: .infinity)
-
-                metadataRow(for: reminder, now: now)
-
-                if reminder.event.isFromCache {
-                    Label("Calendar data may be stale", systemImage: "exclamationmark.triangle")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.orange)
-                        .padding(.horizontal, 12)
-                        .frame(height: 30)
-                        .background(.orange.opacity(0.14), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                }
+    private var meetingOptions: some View {
+        ForEach(reminders) { reminder in
+            let selected = keyTarget.selectedReminder?.id == reminder.id
+            Button { keyTarget.selectedID = reminder.id } label: {
+                Text("\(reminder.event.title) · \(DateFormatter.shortTimeString(from: reminder.event.startDate))")
+                    .font(.system(size: 12)).lineLimit(2).multilineTextAlignment(.center)
+                    .padding(.vertical, 9)
+                    .foregroundStyle(selected ? Color.primary : Color.secondary)
+                    .overlay(alignment: .bottom) { Rectangle().fill(selected ? ShieldTheme.accent : .clear).frame(height: 2) }
             }
-            .padding(.horizontal, 34)
-            .padding(.top, 30)
-            .padding(.bottom, 24)
-
-            Divider()
-                .overlay(.white.opacity(0.08))
-
-            VStack(spacing: 14) {
-                if reminder.detectedLinks.isEmpty {
-                    linklessWarning
-                }
-
-                HStack(spacing: 12) {
-                    Button {
-                        onJoin(reminder)
-                    } label: {
-                        Label(reminder.detectedLinks.isEmpty ? "Open Event" : "Join", systemImage: reminder.detectedLinks.isEmpty ? "calendar" : "video.fill")
-                            .font(.system(size: 22, weight: .bold, design: .rounded))
-                            .frame(maxWidth: .infinity, minHeight: 62)
-                    }
-                    .buttonStyle(LiquidAlertButtonStyle(kind: .primary, minWidth: 210))
-                    .keyboardShortcut(.defaultAction)
-                    .accessibilityLabel(reminder.detectedLinks.isEmpty ? "Open event" : "Join meeting")
-                    .accessibilityValue(reminder.detectedLinks.isEmpty ? "Open event" : "Join meeting")
-                    .accessibilityHint(reminder.detectedLinks.isEmpty ? "Opens the calendar event" : "Opens the meeting link")
-
-                    Button {
-                        onSnooze(reminder, nil)
-                    } label: {
-                        Label("Snooze", systemImage: "clock")
-                            .font(.system(size: 22, weight: .bold, design: .rounded))
-                            .frame(maxWidth: .infinity, minHeight: 62)
-                    }
-                    .buttonStyle(LiquidAlertButtonStyle(kind: .secondary, minWidth: 180))
-                    .keyboardShortcut("s", modifiers: [])
-                    .disabled(availableSnoozeChoices(reminder, now).isEmpty)
-                    .accessibilityLabel("Snooze reminder")
-                    .accessibilityValue("Snooze reminder")
-                    .accessibilityHint("Uses the default snooze duration")
-                }
-
-                snoozeChoices(for: reminder, now: now)
-            }
-            .padding(.horizontal, 34)
-            .padding(.vertical, 22)
-
-            HStack(spacing: 14) {
-                DismissHoldButton(
-                    hasOverlappingReminders: reminders.count > 1,
-                    action: { onDismiss(reminder) },
-                    requestConfirmation: { onRequestDismissal(reminder) }
-                )
-                Button {
-                    onMute(reminder)
-                } label: {
-                    Label("Stay Here", systemImage: "speaker.slash")
-                        .font(.system(size: 13, weight: .semibold))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.white.opacity(0.54))
-                .accessibilityLabel("Stay here")
-                .accessibilityValue("Stay here")
-                .accessibilityHint("Mutes this event occurrence until it ends")
-
-                Spacer()
-                Text(reminder.detectedLinks.isEmpty ? "Opens the calendar event page" : linkSourceLabel(for: reminder))
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.42))
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 34)
-            .padding(.vertical, 16)
-            .background(Color.black.opacity(0.14))
+            .buttonStyle(.plain)
+            .accessibilityLabel("Show alert for \(reminder.event.title)")
+            .accessibilityValue(selected ? "Selected" : "Not selected")
+            .accessibilityAddTraits(selected ? .isSelected : [])
         }
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [.white.opacity(0.22), .white.opacity(0.06), .black.opacity(0.22)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1
-                )
+    }
+
+    private func alertContent(_ reminder: ScheduledReminder, now: Date) -> some View {
+        let canSnooze = !availableSnoozeChoices(reminder, now).isEmpty
+        return VStack(spacing: 0) {
+            Text(reminder.event.startDate > now ? "Your meeting starts in" : "Your meeting has started")
+                .font(.system(size: 12)).foregroundStyle(.secondary).padding(.bottom, 12)
+            Text(Self.countdown(until: reminder.event.startDate, now: now))
+                .font(.system(size: 64, weight: .regular).monospacedDigit())
+                .foregroundStyle(.secondary).padding(.bottom, 18)
+                .accessibilityLabel("Meeting countdown")
+                .accessibilityValue(Self.countdown(until: reminder.event.startDate, now: now))
+            Text(reminder.event.title)
+                .font(.system(size: 38, weight: .medium)).multilineTextAlignment(.center)
+                .lineLimit(4).minimumScaleFactor(0.65).padding(.bottom, 12)
+                .accessibilityAddTraits(.isHeader)
+            Text("\(DateFormatter.shortTimeString(from: reminder.event.startDate))–\(DateFormatter.shortTimeString(from: reminder.event.endDate)) · \(calendarLabel(reminder)) · \(linkLabel(reminder))")
+                .font(.system(size: 13)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            if reminders.contains(where: { $0.event.meetingRoom?.isEmpty == false }) {
+                Label(reminder.event.meetingRoom ?? "Meeting room", systemImage: "mappin.and.ellipse")
+                    .font(.system(size: 13)).foregroundStyle(.secondary)
+                    .lineLimit(2).frame(height: 36).padding(.top, 8)
+                    .opacity(reminder.event.meetingRoom?.isEmpty == false ? 1 : 0)
+                    .accessibilityHidden(reminder.event.meetingRoom?.isEmpty != false)
+            }
+            // Reserve optional metadata across the whole overlap set. Switching the
+            // selected meeting must not move the countdown, title or action buttons.
+            if reminders.contains(where: { $0.event.isFromCache }) {
+                Label("Calendar data may be stale", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(ShieldTheme.warning).font(.system(size: 13)).padding(.top, 14)
+                    .opacity(reminder.event.isFromCache ? 1 : 0)
+                    .accessibilityHidden(!reminder.event.isFromCache)
+            }
+            if reminders.contains(where: { $0.detectedLinks.isEmpty }) {
+                Text("No meeting link found. Open the calendar event instead.")
+                    .font(.system(size: 13)).foregroundStyle(ShieldTheme.warning)
+                    .multilineTextAlignment(.center).padding(.top, 14)
+                    .opacity(reminder.detectedLinks.isEmpty ? 1 : 0)
+                    .accessibilityHidden(!reminder.detectedLinks.isEmpty)
+            }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { primaryActions(reminder, canSnooze: canSnooze) }
+                VStack(spacing: 12) { primaryActions(reminder, canSnooze: canSnooze) }
+            }.padding(.top, 32)
+            if canSnooze {
+                DisclosureGroup("Other snooze options", isExpanded: $expandedSnooze) {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) { snoozeChoices(reminder, now: now) }
+                        VStack(spacing: 8) { snoozeChoices(reminder, now: now) }
+                    }.padding(.top, 10)
+                }
+                .disclosureGroupStyle(ReservedSnoozeDisclosureStyle())
+                .font(.system(size: 12)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true).frame(maxWidth: 390).padding(.top, 16)
+            } else {
+                Text("Snooze is unavailable this close to the start.")
+                    .font(.system(size: 12)).foregroundStyle(.secondary).padding(.top, 16)
+            }
+            HStack(spacing: 20) {
+                DismissHoldButton(hasOverlappingReminders: reminders.count > 1,
+                                  action: { onDismiss(reminder) }, requestConfirmation: { onRequestDismissal(reminder) })
+                Button("Stay here") { onMute(reminder) }
+                    .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(.secondary)
+                    .accessibilityHint("Mutes only this event occurrence until it ends")
+            }.padding(.top, 24)
+            if reminders.count > 1 {
+                Button("Snooze all visible") { onSnoozeAll() }
+                    .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(.secondary)
+                    .disabled(reminders.allSatisfy { availableSnoozeChoices($0, now).isEmpty })
+                    .accessibilityLabel("Snooze all visible meetings")
+                    .accessibilityHint("Snoozes meetings that can return safely; imminent meetings stay visible")
+                    .padding(.top, 18)
+            }
         }
-        .shadow(color: .black.opacity(0.55), radius: 36, x: 0, y: 22)
-        .shadow(color: .white.opacity(0.05), radius: 1, x: 0, y: 1)
-        .accessibilityElement(children: .contain)
     }
 
     @ViewBuilder
-    private func snoozeChoices(for reminder: ScheduledReminder, now: Date) -> some View {
-        let choices = availableSnoozeChoices(reminder, now)
-        if !choices.isEmpty {
-            HStack(spacing: 8) {
-                ForEach(choices, id: \.label) { choice in
-                    Button {
-                        onSnooze(reminder, choice)
-                    } label: {
-                        Text(choice.label)
-                            .font(.system(size: 13, weight: .semibold))
-                            .frame(minWidth: 54, minHeight: 28)
-                    }
-                    .buttonStyle(SnoozeChipButtonStyle())
-                    .accessibilityLabel("Snooze \(choice.label)")
-                    .accessibilityValue("Snooze \(choice.label)")
-                    .accessibilityHint("The reminder will return before the meeting starts")
-                }
+    private func primaryActions(_ reminder: ScheduledReminder, canSnooze: Bool) -> some View {
+        Button { onJoin(reminder) } label: {
+            Label(reminder.detectedLinks.isEmpty ? "Open event" : "Join meeting", systemImage: reminder.detectedLinks.isEmpty ? "calendar" : "video")
+                .font(.system(size: 16, weight: .medium)).frame(width: 172, height: 46)
+        }
+        .buttonStyle(ShieldButtonStyle(role: .primary))
+        .keyboardShortcut(.defaultAction)
+        .accessibilityLabel(reminder.detectedLinks.isEmpty ? "Open event" : "Join meeting")
+        Button { onSnooze(reminder, nil) } label: {
+            Text("Snooze").font(.system(size: 16, weight: .medium)).frame(width: 150, height: 46)
+        }
+        .buttonStyle(ShieldButtonStyle())
+        .keyboardShortcut("s", modifiers: [])
+        .disabled(!canSnooze)
+        .accessibilityLabel("Snooze reminder").accessibilityHint("Uses the default snooze duration, clamped before the meeting starts")
+    }
+
+    private func snoozeChoices(_ reminder: ScheduledReminder, now: Date) -> some View {
+        ForEach(availableSnoozeChoices(reminder, now), id: \.label) { choice in
+            Button(choice.label) { onSnooze(reminder, choice) }
+                .buttonStyle(ShieldButtonStyle())
+                .accessibilityLabel("Snooze \(choice.label)")
+        }
+    }
+
+    static func countdown(until start: Date, now: Date) -> String {
+        let seconds = max(0, Int(ceil(start.timeIntervalSince(now))))
+        if seconds == 0 { return "Now" }
+        return String(format: "%02d:%02d", seconds / 60, seconds % 60)
+    }
+
+    private func calendarLabel(_ reminder: ScheduledReminder) -> String {
+        let name = reminder.event.calendarDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? reminder.event.accountDisplayName : name
+    }
+
+    private func linkLabel(_ reminder: ScheduledReminder) -> String {
+        switch reminder.detectedLinks.first?.kind {
+        case .googleMeet: "Google Meet"
+        case .zoom: "Zoom"
+        case .teams: "Teams"
+        case .webex: "Webex"
+        case .generic: "Meeting link"
+        case nil: "Calendar event"
+        }
+    }
+}
+
+private struct ReservedSnoozeDisclosureStyle: DisclosureGroupStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button { configuration.isExpanded.toggle() } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: configuration.isExpanded ? "chevron.down" : "chevron.right")
+                        .frame(width: 10).accessibilityHidden(true)
+                    configuration.label
+                }.contentShape(Rectangle())
             }
-        }
-    }
-
-    private var linklessWarning: some View {
-        HStack(spacing: 9) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 13, weight: .semibold))
-            Text("No meeting link was found. Opening the Google Calendar event instead.")
-                .font(.system(size: 13, weight: .semibold))
-                .lineLimit(1)
-            Spacer(minLength: 0)
-        }
-        .foregroundStyle(.orange)
-        .padding(.horizontal, 12)
-        .frame(height: 34)
-        .background(.orange.opacity(0.13), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .stroke(.orange.opacity(0.22), lineWidth: 1)
-        }
-    }
-
-    private func timeLine(for reminder: ScheduledReminder, now: Date) -> String {
-        let time = DateFormatter.shortTimeString(from: reminder.event.startDate)
-        let countdown = RelativeDateTimeFormatter.shortString(for: reminder.event.startDate, relativeTo: now)
-        return "\(time) · \(countdown)"
-    }
-
-    private func metadataRow(for reminder: ScheduledReminder, now: Date) -> some View {
-        VStack(spacing: 7) {
-            HStack(spacing: 12) {
-                Label(timeLine(for: reminder, now: now), systemImage: "clock")
-                    .font(.system(size: 18, weight: .semibold, design: .rounded).monospacedDigit())
-                    .fixedSize(horizontal: true, vertical: false)
-                if let meetingRoom = meetingRoomLabel(for: reminder) {
-                    metadataDivider
-                    Label(meetingRoom, systemImage: "mappin.and.ellipse")
-                        .font(.system(size: 18, weight: .semibold, design: .rounded))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .layoutPriority(1)
-                }
-            }
-            .foregroundStyle(.white.opacity(0.68))
-            .minimumScaleFactor(0.72)
-
-            HStack(spacing: 7) {
-                Image(systemName: "calendar")
-                    .font(.system(size: 13, weight: .semibold))
-                Text(calendarLabel(for: reminder))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            .font(.system(size: 14, weight: .semibold, design: .rounded))
-            .foregroundStyle(.white.opacity(0.54))
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var metadataDivider: some View {
-        Divider()
-            .frame(height: 16)
-    }
-
-    private func calendarLabel(for reminder: ScheduledReminder) -> String {
-        let calendar = reminder.event.calendarDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !calendar.isEmpty {
-            return calendar
-        }
-        return reminder.event.accountDisplayName
-    }
-
-    private func meetingRoomLabel(for reminder: ScheduledReminder) -> String? {
-        let room = reminder.event.meetingRoom?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let room, !room.isEmpty else { return nil }
-        return room
-    }
-
-    private func linkStatus(for reminder: ScheduledReminder) -> String {
-        guard let link = reminder.detectedLinks.first else {
-            return "Open event fallback"
-        }
-        switch link.kind {
-        case .googleMeet:
-            return "Google Meet ready"
-        case .zoom:
-            return "Zoom link ready"
-        case .teams:
-            return "Teams link ready"
-        case .webex:
-            return "Webex link ready"
-        case .generic:
-            return "Meeting link ready"
-        }
-    }
-
-    private func linkSourceLabel(for reminder: ScheduledReminder) -> String {
-        guard let link = reminder.detectedLinks.first else {
-            return "No meeting link"
-        }
-        switch link.source {
-        case .conferenceMetadata:
-            return "Link from calendar conference data"
-        case .location:
-            return "Link from event location"
-        case .description:
-            return "Link from event notes"
+            .buttonStyle(.plain)
+            .accessibilityValue(configuration.isExpanded ? "Expanded" : "Collapsed")
+            // Keep the same measured height while collapsed, without exposing
+            // invisible choices to pointer, keyboard or accessibility actions.
+            configuration.content
+                .frame(maxWidth: .infinity)
+                .opacity(configuration.isExpanded ? 1 : 0)
+                .disabled(!configuration.isExpanded)
+                .allowsHitTesting(configuration.isExpanded)
+                .accessibilityHidden(!configuration.isExpanded)
         }
     }
 }
@@ -360,13 +239,13 @@ struct DismissHoldButton: View {
     var body: some View {
         Label(title, systemImage: isPressing ? "checkmark.circle.fill" : "hand.tap")
             .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(isPressing ? .red : .white.opacity(0.58))
+            .foregroundStyle(isPressing ? .red : Color.secondary)
             .padding(.horizontal, 11)
             .frame(height: 30)
-            .background(isPressing ? .red.opacity(0.15) : .white.opacity(0.07), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(isPressing ? .red.opacity(0.15) : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(isPressing ? .red.opacity(0.36) : .white.opacity(0.08), lineWidth: 1)
+                    .stroke(isPressing ? .red.opacity(0.36) : Color.clear, lineWidth: 1)
             }
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .focusable()
@@ -393,114 +272,5 @@ struct DismissHoldButton: View {
                     .accessibilityValue("Confirmation required")
                     .accessibilityHint(accessibilityHint)
             }
-    }
-}
-
-private struct LiquidAlertButtonStyle: ButtonStyle {
-    enum Kind {
-        case primary
-        case secondary
-    }
-
-    var kind: Kind
-    var minWidth: CGFloat
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .padding(.horizontal, 18)
-            .frame(minWidth: minWidth)
-            .foregroundStyle(foregroundColor)
-            .background(backgroundStyle(isPressed: configuration.isPressed), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(borderStyle, lineWidth: 1)
-            }
-            .shadow(color: shadowColor, radius: configuration.isPressed ? 6 : 14, x: 0, y: configuration.isPressed ? 3 : 9)
-            .scaleEffect(configuration.isPressed ? 0.985 : 1)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
-    }
-
-    private var foregroundColor: Color {
-        switch kind {
-        case .primary:
-            .white
-        case .secondary:
-            .white.opacity(0.88)
-        }
-    }
-
-    private var borderStyle: some ShapeStyle {
-        switch kind {
-        case .primary:
-            LinearGradient(
-                colors: [.white.opacity(0.34), .white.opacity(0.10)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        case .secondary:
-            LinearGradient(
-                colors: [.white.opacity(0.18), .white.opacity(0.07)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        }
-    }
-
-    private var shadowColor: Color {
-        switch kind {
-        case .primary:
-            Color.blue.opacity(0.28)
-        case .secondary:
-            Color.black.opacity(0.20)
-        }
-    }
-
-    private func backgroundStyle(isPressed: Bool) -> some ShapeStyle {
-        switch kind {
-        case .primary:
-            LinearGradient(
-                colors: [
-                    Color(nsColor: NSColor(calibratedRed: 0.18, green: 0.49, blue: 1.0, alpha: isPressed ? 0.82 : 1.0)),
-                    Color(nsColor: NSColor(calibratedRed: 0.05, green: 0.32, blue: 0.86, alpha: isPressed ? 0.82 : 1.0))
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        case .secondary:
-            LinearGradient(
-                colors: [
-                    Color.white.opacity(isPressed ? 0.13 : 0.18),
-                    Color.white.opacity(isPressed ? 0.07 : 0.10)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        }
-    }
-}
-
-private struct SnoozeChipButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .padding(.horizontal, 9)
-            .foregroundStyle(.white.opacity(0.78))
-            .background(.white.opacity(configuration.isPressed ? 0.15 : 0.09), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(.white.opacity(0.08), lineWidth: 1)
-            }
-    }
-}
-
-private struct OverlapChipButtonStyle: ButtonStyle {
-    var isSelected: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(isSelected ? .white : .white.opacity(0.62))
-            .background(
-                isSelected ? Color(nsColor: NSColor.controlAccentColor).opacity(configuration.isPressed ? 0.78 : 0.96) : Color.white.opacity(configuration.isPressed ? 0.10 : 0.04),
-                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-            )
     }
 }

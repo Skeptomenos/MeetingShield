@@ -2,223 +2,241 @@ import AppKit
 import SwiftUI
 
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case general
-    case accounts
-    case calendars
-    case alerts
-    case browser
-
+    case calendars, alerts, menuBar, general
     var id: String { rawValue }
-
     var title: String {
         switch self {
-        case .general: "General"
-        case .accounts: "Accounts"
         case .calendars: "Calendars"
         case .alerts: "Alerts"
-        case .browser: "Browser"
+        case .menuBar: "Menu bar"
+        case .general: "General"
         }
     }
-
+    var subtitle: String {
+        switch self {
+        case .calendars: "Decide what appears, and what gets your attention."
+        case .alerts: "A little time to finish what you’re doing."
+        case .menuBar: "Your next meeting, at a glance."
+        case .general: "Make Meeting Shield feel at home."
+        }
+    }
     var systemImage: String {
         switch self {
-        case .general: "gearshape"
-        case .accounts: "person"
         case .calendars: "calendar"
         case .alerts: "bell"
-        case .browser: "globe"
+        case .menuBar: "menubar.rectangle"
+        case .general: "gearshape"
         }
     }
 }
 
-enum SettingsTheme {
-    static let window = LiquidGlassTheme.window
-    static let sidebar = LiquidGlassTheme.sidebar
-    static let card = LiquidGlassTheme.glassFill
-    static let separator = LiquidGlassTheme.separator
-    static let border = LiquidGlassTheme.border
-    static let selected = LiquidGlassTheme.accent.opacity(0.22)
-}
-
-enum SettingsLayout {
-    static let titlebarSafeTopPadding: CGFloat = 50
-}
 struct SettingsView: View {
     @ObservedObject var store = AppSettingsStore.shared
     @ObservedObject var controller = MeetingShieldController.shared
     @State private var selectedPane: SettingsPane = .calendars
+    @State var expandedCalendarIDs: Set<String> = []
+    @State var managingAccount: ConnectedCalendarAccount?
+    @State var accountPendingRemoval: ConnectedCalendarAccount?
     @State private var showDeveloperSetup = false
+    @State private var showAlertPreview = false
 
     var body: some View {
         HStack(spacing: 0) {
             sidebar
             Divider()
-                .background(SettingsTheme.separator)
-            content
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    pageHeading
+                    PersistenceRecoverySection(controller: controller)
+                    switch selectedPane {
+                    case .calendars:
+                        if connectedAccounts.isEmpty || !controller.hasGoogleOAuthClientConfiguration || needsConnectionRecovery {
+                            connectionSection
+                        }
+                        calendarsSection
+                        Text("Read-only access. Your calendar events stay unchanged.")
+                            .font(.system(size: 11)).foregroundStyle(.secondary)
+                        developerSetup
+                    case .alerts:
+                        alertTimingSection
+                        soundSection
+                        quietDeliverySection
+                    case .menuBar:
+                        menuBarSection
+                    case .general:
+                        SettingsSection(title: "Startup") {
+                            SettingsCard {
+                                SettingsRow(title: "Launch at login", subtitle: "Ready when you start your day.") {
+                                    CompactSwitch(isOn: launchAtLoginBinding, accessibilityLabel: "Launch at login")
+                                }
+                            }
+                        }
+                        browserSection
+                        privacySection
+                    }
+                }
+                .padding(26)
+                .frame(maxWidth: 700, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .background(ShieldTheme.window)
         }
-        .frame(minWidth: 740, minHeight: 580)
-        .background(.regularMaterial)
-        .background(SettingsTheme.window)
+        .frame(minWidth: 740, minHeight: 540)
+        .background(ShieldTheme.window)
+        .sheet(item: $managingAccount) { account in accountDetails(account) }
+        .sheet(isPresented: $showAlertPreview) { AlertDesignPreview() }
     }
 
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 5) {
             ForEach(SettingsPane.allCases) { pane in
-                Button {
-                    selectedPane = pane
-                } label: {
+                Button { selectedPane = pane } label: {
                     Label(pane.title, systemImage: pane.systemImage)
-                        .font(.system(size: 13, weight: selectedPane == pane ? .semibold : .medium))
-                        .foregroundStyle(selectedPane == pane ? Color.white.opacity(0.92) : LiquidGlassTheme.secondaryText)
+                        .font(.system(size: 13, weight: selectedPane == pane ? .medium : .regular))
+                        .foregroundStyle(selectedPane == pane ? ShieldTheme.accent : Color.primary)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(
-                            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .fill(selectedPane == pane ? SettingsTheme.selected : Color.clear)
-                        )
-                        .overlay {
-                            if selectedPane == pane {
-                                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                            }
-                        }
+                        .padding(.horizontal, 12).padding(.vertical, 10)
+                        .background(selectedPane == pane ? ShieldTheme.accent.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 7))
                 }
                 .buttonStyle(.plain)
+                .accessibilityAddTraits(selectedPane == pane ? .isSelected : [])
             }
             Spacer()
+            Label("Meeting Shield", systemImage: "shield")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+                .padding(.horizontal, 12).padding(.bottom, 8)
         }
-        .padding(.top, SettingsLayout.titlebarSafeTopPadding)
-        .padding(.horizontal, 10)
-        .frame(width: 194)
-        .background(.ultraThinMaterial)
-        .background(SettingsTheme.sidebar)
+        .padding(.horizontal, 10).padding(.top, 16)
+        .frame(width: 170)
+        .background(ShieldTheme.sidebar)
     }
 
-    @ViewBuilder
-    private var content: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                PersistenceRecoverySection(controller: controller)
-                switch selectedPane {
-                case .general:
-                    menuBarSection
-                    recoverySection
-                case .calendars:
-                    calendarsSection
-                case .alerts:
-                    alertTimingSection
-                    recoverySection
-                case .browser:
-                    browserSection
-                case .accounts:
-                    accountsSection
-                    googleCalendarSection
-                    privacySection
-                }
+    private var pageHeading: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(selectedPane.title).font(.system(size: 25, weight: .medium))
+                    .accessibilityAddTraits(.isHeader)
+                Text(selectedPane.subtitle).font(.system(size: 12)).foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 22)
-            .padding(.top, SettingsLayout.titlebarSafeTopPadding)
-            .padding(.bottom, 24)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            Spacer(minLength: 0)
+            if selectedPane == .calendars {
+                Button { controller.reconnectGoogle() } label: { Label("Account", systemImage: "plus") }
+                    .buttonStyle(ShieldButtonStyle())
+                    .disabled(!controller.hasGoogleOAuthClientConfiguration || isConnecting)
+                    .accessibilityLabel("Add Google account")
+            } else if selectedPane == .alerts {
+                Button("Preview alert") { showAlertPreview = true }.buttonStyle(ShieldButtonStyle())
+            } else if selectedPane == .menuBar {
+                Button("Preview menu") { MenuBarController.shared.showPopover() }.buttonStyle(ShieldButtonStyle())
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.regularMaterial)
-        .background(SettingsTheme.window)
     }
 
-    private var googleCalendarSection: some View {
+    private var isConnecting: Bool {
+        if case .authenticating = controller.authState { return true }
+        return false
+    }
+
+    var connectionSection: some View {
         SettingsSection(title: "Google Calendar") {
             SettingsCard {
-                SettingsRow(title: "Status", value: googleStatusText)
-                SettingsDivider()
-                SettingsRow(title: "Connection", value: controller.googleOAuthConfigurationSource)
+                SettingsRow(title: "Connection", value: googleStatusText)
                 SettingsDivider()
                 SettingsRow {
-                    Button {
-                        MeetingShieldController.shared.reconnectGoogle()
-                    } label: {
-                        Label("Connect Google Calendar", systemImage: "link")
-                    }
-                    .buttonStyle(SmallGlassButtonStyle(role: .neutral))
-                    .disabled(!controller.hasGoogleOAuthClientConfiguration)
+                    Button(isConnecting ? "Connecting…" : connectedAccounts.isEmpty ? "Connect Google Calendar" : "Reconnect Google Calendar") { controller.reconnectGoogle() }
+                        .buttonStyle(ShieldButtonStyle())
+                        .disabled(!controller.hasGoogleOAuthClientConfiguration || isConnecting)
                 }
-                SettingsDivider()
-                DisclosureGroup(isExpanded: $showDeveloperSetup) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        TextField("OAuth desktop client ID", text: binding(\.googleOAuthClientID))
-                            .glassTextField()
-                    }
-                    .padding(.top, 8)
-                } label: {
-                    Text("Developer Google setup")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(LiquidGlassTheme.secondaryText)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
             }
         }
+    }
+
+    private var developerSetup: some View {
+        DisclosureGroup("Developer setup", isExpanded: $showDeveloperSetup) {
+            VStack(alignment: .leading, spacing: 8) {
+                TextField("OAuth desktop client ID", text: binding(\.googleOAuthClientID))
+                    .shieldTextField()
+                    .accessibilityLabel("OAuth desktop client ID")
+                Text("Leave empty to use the configuration included with the app.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+            }.padding(.top, 8)
+        }
+        .font(.system(size: 12))
+        .foregroundStyle(.secondary)
     }
 
     private var alertTimingSection: some View {
-        SettingsSection(title: "Alert Timing") {
+        SettingsSection(title: "Timing") {
             SettingsCard {
-                SettingsRow {
-                    Stepper(
-                        "Lead time: \(Int(store.snapshot.defaultLeadTime))s",
-                        value: doubleBinding(\.defaultLeadTime),
-                        in: AppSettingsSnapshot.defaultLeadTimeRange,
-                        step: AppSettingsSnapshot.defaultLeadTimeStep
-                    )
-                }
-                SettingsDivider()
-                SettingsRow(title: "Snooze") {
-                    Picker("Snooze", selection: doubleBinding(\.globalSnoozeDuration)) {
-                        Text("30s").tag(TimeInterval(30))
-                        Text("1m").tag(TimeInterval(60))
-                        Text("2m").tag(TimeInterval(120))
-                        Text("5m").tag(TimeInterval(300))
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("Remind me before a meeting")
+                        Spacer()
+                        Text(Self.durationLabel(store.snapshot.defaultLeadTime)).monospacedDigit().foregroundStyle(.secondary)
                     }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .controlSize(.small)
-                    .frame(width: 72)
+                    Slider(value: doubleBinding(\.defaultLeadTime), in: AppSettingsSnapshot.defaultLeadTimeRange, step: AppSettingsSnapshot.defaultLeadTimeStep)
+                        .accessibilityLabel("Alert lead time")
+                        .accessibilityValue(Self.durationLabel(store.snapshot.defaultLeadTime))
+                    HStack { Text("30 seconds"); Spacer(); Text("15 minutes") }
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                }.padding(15).font(.system(size: 13))
+                SettingsDivider()
+                SettingsRow(title: "Default snooze", subtitle: "Always returns by 10 seconds before the start.") {
+                    Picker("Default snooze", selection: doubleBinding(\.globalSnoozeDuration)) {
+                        ForEach([30.0, 60, 120, 300], id: \.self) { seconds in
+                            Text(Self.durationLabel(seconds)).tag(seconds)
+                        }
+                    }.labelsHidden().frame(width: 120)
+                }
+            }
+        }
+    }
+
+    private var soundSection: some View {
+        SettingsSection(title: "Sound") {
+            SettingsCard {
+                SettingsRow(title: "Play an alert sound", subtitle: "Silent by default.") {
+                    CompactSwitch(isOn: boolBinding(\.soundEnabled), accessibilityLabel: "Play an alert sound")
+                }
+                if store.snapshot.soundEnabled {
+                    SettingsDivider()
+                    SettingsRow(title: "Repeat near the start", subtitle: "A second cue when the meeting is imminent.") {
+                        CompactSwitch(isOn: boolBinding(\.urgentRepeatSoundEnabled), accessibilityLabel: "Urgent repeat sound")
+                    }
+                }
+            }
+        }
+    }
+
+    private var quietDeliverySection: some View {
+        SettingsSection(title: "When to stay quiet") {
+            SettingsCard {
+                if let warning = controller.notificationWarning {
+                    SettingsRow { Label(warning, systemImage: "bell.slash.circle").foregroundStyle(ShieldTheme.warning).fixedSize(horizontal: false, vertical: true) }
+                    SettingsDivider()
+                }
+                SettingsRow(title: "Presentation mode by default", subtitle: "Use notifications instead of full-screen alerts.") {
+                    CompactSwitch(isOn: boolBinding(\.presentationModeDefault), accessibilityLabel: "Presentation mode by default")
                 }
                 SettingsDivider()
-                SettingsRow(title: "Sound") {
-                    CompactSwitch(isOn: boolBinding(\.soundEnabled), accessibilityLabel: "Sound")
-                }
-                SettingsDivider()
-                SettingsRow(title: "Urgent repeat sound") {
-                    CompactSwitch(isOn: boolBinding(\.urgentRepeatSoundEnabled), accessibilityLabel: "Urgent repeat sound")
+                SettingsRow(title: "Give me a minute after waking", subtitle: "Use notifications for the first 60 seconds.") {
+                    CompactSwitch(isOn: boolBinding(\.wakeGraceEnabled), accessibilityLabel: "Wake grace notifications")
                 }
             }
         }
     }
 
     private var browserSection: some View {
-        SettingsSection(title: "Browser") {
+        SettingsSection(title: "Opening meetings") {
             SettingsCard {
                 SettingsRow(title: "Default browser") {
                     Picker("Default browser", selection: browserBinding) {
-                        ForEach(BrowserKind.allCases) { browser in
-                            Text(browser.displayName).tag(browser)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .controlSize(.small)
-                    .frame(width: 112)
+                        ForEach(BrowserKind.allCases) { browser in Text(browser.displayName).tag(browser) }
+                    }.labelsHidden().frame(width: 155)
                 }
                 if store.snapshot.defaultBrowserSelection.browser.supportsProfileSelection {
                     SettingsDivider()
-                    SettingsRow(title: "Profile") {
-                        profilePicker(
-                            browser: store.snapshot.defaultBrowserSelection.browser,
-                            selection: globalProfileBinding
-                        )
-                    }
+                    SettingsRow(title: "Profile") { profilePicker(browser: store.snapshot.defaultBrowserSelection.browser, selection: globalProfileBinding) }
                 }
             }
         }
@@ -227,80 +245,34 @@ struct SettingsView: View {
     @ViewBuilder
     func profilePicker(browser: BrowserKind, selection: Binding<String?>) -> some View {
         let profiles = BrowserProfileService().profiles(for: browser)
-        if profiles.isEmpty {
-            Text("No profiles found")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(LiquidGlassTheme.tertiaryText)
-        } else {
-            Picker("Profile", selection: selection) {
-                Text("Browser default").tag(String?.none)
-                ForEach(profiles) { profile in
-                    Text(profile.displayName).tag(String?.some(profile.id))
-                }
+        Picker("Profile", selection: selection) {
+            Text("Browser default").tag(String?.none)
+            if let selected = selection.wrappedValue, !profiles.contains(where: { $0.id == selected }) {
+                Text("Saved profile unavailable").tag(String?.some(selected))
             }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .controlSize(.small)
-            .frame(width: 150)
-        }
-    }
-    private var menuBarSection: some View {
-        SettingsSection(title: "Menu Bar") {
-            SettingsCard {
-                SettingsRow(title: "Visibility") {
-                    Picker("Visibility", selection: visibilityKindBinding) {
-                        ForEach(MenuVisibilityKind.allCases) { kind in
-                            Text(kind.displayName).tag(kind)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .controlSize(.small)
-                    .frame(width: 128)
-                }
-                SettingsDivider()
-                SettingsRow {
-                    Stepper("Hours: \(store.snapshot.visibilityWindow.hours)", value: intBinding(\.visibilityWindow.hours), in: 1...12)
-                        .controlSize(.small)
-                }
-                SettingsDivider()
-                SettingsRow {
-                    Stepper("Days: \(store.snapshot.visibilityWindow.days)", value: intBinding(\.visibilityWindow.days), in: 1...7)
-                        .controlSize(.small)
-                }
-                SettingsDivider()
-                SettingsRow(title: "Show event titles") {
-                    CompactSwitch(isOn: boolBinding(\.showEventTitlesInMenuBar), accessibilityLabel: "Show event titles")
-                }
-            }
-        }
+            ForEach(profiles) { profile in Text(profile.displayName).tag(String?.some(profile.id)) }
+        }.labelsHidden().frame(width: 165)
     }
 
-    private var recoverySection: some View {
-        SettingsSection(title: "Recovery") {
+    private var menuBarSection: some View {
+        SettingsSection(title: "Visible meetings") {
             SettingsCard {
-                if controller.notificationHealth.authorizationDenied {
-                    SettingsRow {
-                        Label(
-                            "Notifications are disabled in System Settings. Presentation mode and wake grace alerts cannot appear.",
-                            systemImage: "bell.slash.circle.fill"
-                        )
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(LiquidGlassTheme.warning)
-                        .fixedSize(horizontal: false, vertical: true)
-                    }
+                SettingsRow(title: "Show meetings") {
+                    Picker("Show meetings", selection: visibilityKindBinding) {
+                        ForEach(MenuVisibilityKind.allCases) { kind in Text(kind.displayName).tag(kind) }
+                    }.labelsHidden().frame(width: 135)
+                }
+                if store.snapshot.visibilityWindow.kind == .nextHours {
                     SettingsDivider()
+                    SettingsRow { Stepper("Next \(store.snapshot.visibilityWindow.hours) hours", value: intBinding(\.visibilityWindow.hours), in: 1...12) }
                 }
-                SettingsRow(title: "Presentation mode by default") {
-                    CompactSwitch(isOn: boolBinding(\.presentationModeDefault), accessibilityLabel: "Presentation mode by default")
-                }
-                SettingsDivider()
-                SettingsRow(title: "Launch at login") {
-                    CompactSwitch(isOn: launchAtLoginBinding, accessibilityLabel: "Launch at login")
+                if store.snapshot.visibilityWindow.kind == .nextDays {
+                    SettingsDivider()
+                    SettingsRow { Stepper("Next \(store.snapshot.visibilityWindow.days) days", value: intBinding(\.visibilityWindow.days), in: 1...7) }
                 }
                 SettingsDivider()
-                SettingsRow(title: "Wake grace notifications") {
-                    CompactSwitch(isOn: boolBinding(\.wakeGraceEnabled), accessibilityLabel: "Wake grace notifications")
+                SettingsRow(title: "Show event titles", subtitle: "Turn off to keep meeting names private in the menu bar.") {
+                    CompactSwitch(isOn: boolBinding(\.showEventTitlesInMenuBar), accessibilityLabel: "Show event titles")
                 }
             }
         }
@@ -308,38 +280,37 @@ struct SettingsView: View {
 
     private var privacySection: some View {
         SettingsSection(title: "Privacy") {
-            SettingsCard {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Read-only calendar access")
-                        .font(.system(size: 13, weight: .semibold))
-                    Text("Tokens stay in Keychain. Calendar cache stays local.")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(LiquidGlassTheme.secondaryText)
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Read-only calendar access", systemImage: "lock.shield")
+                Text("Tokens stay in Keychain. The limited calendar cache stays on this Mac. Meeting titles and links are not logged.")
+                    .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                DisclosureGroup("Calendar permissions") {
                     Text(AppIdentity.googleScopes.joined(separator: "\n"))
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(LiquidGlassTheme.tertiaryText)
-                }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                        .font(.system(size: 11)).foregroundStyle(.secondary).textSelection(.enabled).padding(.top, 6)
+                }.font(.system(size: 12))
             }
         }
     }
 
-    private var googleStatusText: String {
-        switch controller.authState {
-        case .authenticating:
-            "Connecting"
-        case .connected:
-            "Connected"
-        case .disconnected:
-            "Disconnected"
-        case .needsConfiguration:
-            "Needs setup"
-        case .expired:
-            "Needs reconnect"
-        }
+    static func durationLabel(_ seconds: TimeInterval) -> String {
+        if seconds < 60 { return "\(Int(seconds)) seconds" }
+        let minutes = seconds / 60
+        return minutes == 1 ? "1 minute" : "\(minutes.formatted(.number.precision(.fractionLength(0...1)))) minutes"
     }
 
+    var needsConnectionRecovery: Bool {
+        controller.protectionHealthSummary.actions.contains(.reconnect)
+    }
+
+    var googleStatusText: String {
+        switch controller.authState {
+        case .authenticating: "Connecting"
+        case .connected: needsConnectionRecovery ? "Needs reconnect" : "Connected"
+        case .disconnected: "Disconnected"
+        case .needsConfiguration: "Needs setup"
+        case .expired: "Needs reconnect"
+        }
+    }
     private var browserBinding: Binding<BrowserKind> {
         Binding {
             store.snapshot.defaultBrowserSelection.browser

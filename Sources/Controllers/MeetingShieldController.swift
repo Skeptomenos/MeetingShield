@@ -423,18 +423,18 @@ final class MeetingShieldController: ObservableObject {
     }
 
     var menuBarSystemImage: String {
-        if !persistenceWarnings.isEmpty { return "exclamationmark.triangle.fill" }
+        if !persistenceWarnings.isEmpty { return "exclamationmark.shield" }
         if notificationWarning != nil { return "bell.slash.circle.fill" }
         if isPresentationMode { return "bell.slash.fill" }
-        if case .disconnected = authState { return "exclamationmark.triangle.fill" }
-        if case .needsConfiguration = authState { return "exclamationmark.triangle.fill" }
-        if case .expired = authState { return "exclamationmark.triangle.fill" }
-        if statusMessage != nil { return "calendar.badge.exclamationmark" }
-        if !activeReminders.isEmpty { return "alarm.fill" }
+        if case .disconnected = authState { return "exclamationmark.shield" }
+        if case .needsConfiguration = authState { return "exclamationmark.shield" }
+        if case .expired = authState { return "exclamationmark.shield" }
+        if statusMessage != nil { return "exclamationmark.shield" }
+        if !activeReminders.isEmpty { return "shield.fill" }
         if nextEvent?.startDate.timeIntervalSinceNow ?? .greatestFiniteMagnitude < 5 * 60 {
-            return "clock.badge.exclamationmark"
+            return "checkmark.shield.fill"
         }
-        return "calendar.badge.clock"
+        return "shield"
     }
 
     var hasGoogleOAuthClientConfiguration: Bool {

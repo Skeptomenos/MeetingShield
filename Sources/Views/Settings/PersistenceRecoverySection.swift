@@ -12,13 +12,13 @@ struct PersistenceRecoverySection: View {
                         ForEach(warnings.indices, id: \.self) { index in
                             Label(warnings[index], systemImage: "exclamationmark.triangle")
                                 .font(.body)
-                                .foregroundStyle(LiquidGlassTheme.warning)
+                                .foregroundStyle(ShieldTheme.warning)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         if controller.settingsPersistenceFailure != nil || controller.reminderPersistenceFailure != nil {
                             Text("Current choices still apply in this session. Unsaved changes may be lost when the app quits.")
                                 .font(.callout)
-                                .foregroundStyle(LiquidGlassTheme.secondaryText)
+                                .foregroundStyle(ShieldTheme.secondaryText)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         HStack(spacing: 10) {
@@ -36,7 +36,7 @@ struct PersistenceRecoverySection: View {
                         }
                         Text("Retry keeps recoverable data. It does not reset settings, remove accounts or start sign-in.")
                             .font(.caption)
-                            .foregroundStyle(LiquidGlassTheme.secondaryText)
+                            .foregroundStyle(ShieldTheme.secondaryText)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(14)

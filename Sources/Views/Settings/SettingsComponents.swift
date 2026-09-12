@@ -3,14 +3,9 @@ import SwiftUI
 struct SettingsSection<Content: View>: View {
     var title: String
     @ViewBuilder var content: () -> Content
-
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title.uppercased())
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(LiquidGlassTheme.secondaryText)
-                .tracking(0.6)
-                .padding(.leading, 2)
+            Text(title).font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -19,64 +14,44 @@ struct SettingsSection<Content: View>: View {
 
 struct SettingsCard<Content: View>: View {
     @ViewBuilder var content: () -> Content
-
     var body: some View {
-        VStack(spacing: 0) {
-            content()
-        }
-        .glassPanel(cornerRadius: 10)
-        .frame(maxWidth: .infinity)
+        VStack(spacing: 0) { content() }
+            .frame(maxWidth: .infinity)
+            .shieldPanel()
     }
 }
 
 struct SettingsRow<Control: View>: View {
     var title: String?
+    var subtitle: String?
     var value: String?
     @ViewBuilder var control: () -> Control
-
-    init(title: String? = nil, value: String? = nil, @ViewBuilder control: @escaping () -> Control = { EmptyView() }) {
+    init(title: String? = nil, subtitle: String? = nil, value: String? = nil, @ViewBuilder control: @escaping () -> Control = { EmptyView() }) {
         self.title = title
+        self.subtitle = subtitle
         self.value = value
         self.control = control
     }
-
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 18) {
             if let title {
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(LiquidGlassTheme.primaryText)
-                    .lineLimit(1)
-                Spacer(minLength: 12)
-                if let value {
-                    Text(value)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(LiquidGlassTheme.secondaryText)
-                        .lineLimit(1)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).font(.system(size: 13))
+                    if let subtitle {
+                        Text(subtitle).font(.system(size: 11)).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
-                control()
-            } else {
-                control()
-                Spacer(minLength: 12)
-                if let value {
-                    Text(value)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(LiquidGlassTheme.secondaryText)
-                        .lineLimit(1)
-                }
+                Spacer(minLength: 8)
             }
+            if let value { Text(value).foregroundStyle(.secondary) }
+            control()
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
+        .padding(.horizontal, 15).padding(.vertical, 13)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
 struct SettingsDivider: View {
-    var body: some View {
-        Rectangle()
-            .fill(SettingsTheme.separator)
-            .frame(height: 1)
-    }
+    var body: some View { Divider().padding(.horizontal, 15) }
 }
-

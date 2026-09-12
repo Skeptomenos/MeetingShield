@@ -7,6 +7,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
 
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let popover = NSPopover()
+    private let presentation = MenuPresentationState()
     private var controller: MeetingShieldController?
 
     private override init() {
@@ -55,6 +56,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private func updateButton() {
         guard let controller, let button = statusItem.button else { return }
         button.image = NSImage(systemSymbolName: controller.menuBarSystemImage, accessibilityDescription: "Meeting Shield")
+        button.image?.isTemplate = true
         let text = controller.menuBarText.resolved { value in
             let font = button.font ?? NSFont.menuBarFont(ofSize: 0)
             return NSString(string: " \(value)").size(withAttributes: [.font: font]).width
@@ -110,7 +112,9 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         let eventCount = controller?.menuEvents.count ?? 0
         let preferredHeight = MenuContentView.preferredHeight(
             eventCount: eventCount, hasPersistenceWarning: controller?.persistenceWarnings.isEmpty == false,
-            hasNotificationWarning: controller?.notificationWarning != nil
+            hasNotificationWarning: controller?.notificationWarning != nil || controller?.statusMessage != nil,
+            showsMonth: presentation.showsMonth,
+            showsHealth: presentation.showsHealth || controller?.protectionHealthSummary.level != .healthy
         )
         let height = min(preferredHeight, maximumVisiblePopoverHeight())
         popover.contentSize = NSSize(
@@ -123,12 +127,17 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private func updatePopoverContent(height: CGFloat) {
         guard let controller else { return }
         if let hostingController = popover.contentViewController as? NSHostingController<MenuContentView> {
-            hostingController.rootView = MenuContentView(controller: controller, popoverHeight: height)
+            hostingController.rootView = content(controller: controller, height: height)
         } else {
             popover.contentViewController = NSHostingController(
-                rootView: MenuContentView(controller: controller, popoverHeight: height)
+                rootView: content(controller: controller, height: height)
             )
         }
+    }
+
+    private func content(controller: MeetingShieldController, height: CGFloat) -> MenuContentView {
+        MenuContentView(controller: controller, popoverHeight: height, presentation: presentation,
+                        onExpansionChange: { [weak self] in self?.updatePopoverSize() })
     }
 
     private func maximumVisiblePopoverHeight() -> CGFloat {

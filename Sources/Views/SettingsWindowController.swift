@@ -5,26 +5,24 @@ import SwiftUI
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     static let shared = SettingsWindowController()
 
-    private init() {
+    init(store: AppSettingsStore = .shared, controller: MeetingShieldController = .shared) {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 760, height: 620),
+            contentRect: NSRect(x: 0, y: 0, width: 860, height: 620),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = AppIdentity.settingsWindowTitle
-        window.titleVisibility = .hidden
-        window.styleMask.insert(.fullSizeContentView)
-        window.minSize = NSSize(width: 720, height: 560)
+        window.title = "Meeting Shield — Settings"
+        window.minSize = NSSize(width: 760, height: 590)
         window.center()
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.titlebarAppearsTransparent = true
-        window.isMovableByWindowBackground = true
+        window.isOpaque = true
+        window.backgroundColor = .windowBackgroundColor
+        window.titlebarAppearsTransparent = false
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
-        window.contentView = NSHostingView(rootView: SettingsView())
+        window.contentView = NSHostingView(rootView: SettingsView(store: store, controller: controller))
     }
 
     required init?(coder: NSCoder) {

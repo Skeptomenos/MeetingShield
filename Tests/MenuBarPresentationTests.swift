@@ -77,6 +77,6 @@ struct MenuBarPresentationTests {
         )
 
         #expect(controller.authState == .disconnected)
-        #expect(controller.menuBarSystemImage == "exclamationmark.triangle.fill")
+        #expect(controller.menuBarSystemImage == "exclamationmark.shield")
     }
 }
