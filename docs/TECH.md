@@ -25,7 +25,7 @@ Prefer small types with explicit responsibilities over central manager objects t
 
 ### Validation gate
 
-`script/validate.sh` is the single definition of done: build → tests → smoke (assembled `dist/MeetingShield.app` runs `--smoke-test`) → drift checks. Run it before claiming any change complete; never substitute a subset.
+`script/validate.sh` runs build → tests → smoke (assembled `dist/MeetingShield.app` runs `--smoke-test`) → drift checks. Follow the validation scope in [AGENTS.md](../AGENTS.md#commands); use [QUALITY.md](QUALITY.md) for change-specific acceptance.
 
 ## Swift And Concurrency
 
@@ -139,4 +139,4 @@ Use manual/macOS verification for system surfaces:
 - Browser/profile launch.
 - Wake/unlock behavior.
 
-The minimum automated check before completion is `swift test` once `Package.swift` exists. If an Xcode project exists, also run the documented `xcodebuild` command when app integration changed.
+The capsule owns validation frequency and required commands; the change-specific checks above supplement that gate.

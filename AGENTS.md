@@ -2,28 +2,21 @@
 
 Native macOS menu bar app that prevents missed meetings with full-screen Google Calendar alerts, safe snooze/dismiss, and correct browser/profile launch.
 
+Ownership-ID: Personal
+
 ## Stack
 
 - Swift 6, SwiftUI, AppKit, macOS.
 - Google Calendar API with read-only calendar access.
 - Keychain for OAuth tokens; local-only preferences/cache.
 
-## Source Of Truth
-
-- Product behavior: `_planning/product-brief.md`
-- Detailed spec: `_planning/product-spec.md`
-- Implementation plan: `_planning/plans/2026-05-22-build-meeting-shield-mvp.md`
-- App catalog metadata: `../index.md`
-
-## Engineering Law
-
-- Quality and verification: `docs/QUALITY.md`
-- Planning and handoff discipline: `docs/PLANNING.md`
-- Swift/macOS technical constraints: `docs/TECH.md`
+Read [index.md](index.md) at session start for the applicable plan, findings, and task-specific documentation.
 
 ## Commands
 
-- Validation gate (required before claiming any work done): `script/validate.sh` — build, tests, smoke on the assembled .app, drift checks. Never substitute a subset.
+- Before implementation closeout after code, build, dependency, or test changes, run `script/validate.sh` in full — build, tests, assembled-app smoke, and drift checks. Use focused checks during development; reuse evidence while its inputs remain unchanged.
+- For documentation-only changes, verify affected links and documented commands, then run `git diff --check`. Documentation or status updates alone do not require an app rebuild.
+- For changed product behavior, follow the applicable verification row in `docs/QUALITY.md` — the automated gate does not establish live macOS behavior.
 - Fast iteration: `swift build` and `swift test`.
 - Build, install, and run the dev app bundle: `script/build_and_run.sh` (assembly shared via `script/assemble_app.sh`).
 
